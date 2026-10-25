@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from magic_rag.providers import generate_answer, provider_status, provider_from_env
+from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 
 
 def default_db_path() -> Path:
@@ -21,6 +22,7 @@ def connect(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
+    load_vec(db)
     try:
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS card_fts USING fts5(card_id UNINDEXED, text)")
     except sqlite3.OperationalError as exc:
@@ -45,12 +47,13 @@ class SearchRequest(BaseModel):
     generate_answer: bool = False
 
 
-def create_app(db_path: Path | None = None, *, provider=None) -> FastAPI:
+def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, provider=None) -> FastAPI:
     provider = provider if provider is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path):
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
+    embedding_model = embedder or BgeEmbedder()
 
     @app.get("/api/provider")
     def configured_provider():
@@ -60,22 +63,28 @@ def create_app(db_path: Path | None = None, *, provider=None) -> FastAPI:
     def health():
         with connect(path) as db:
             return {"status": "ok", "sqlite_version": sqlite3.sqlite_version,
+                    "sqlite_vec_version": db.execute("SELECT vec_version()").fetchone()[0],
                     "fts5": True, "card_count": db.execute("SELECT count(*) FROM cards").fetchone()[0]}
 
     @app.post("/api/search")
     def search(request: SearchRequest):
         start = perf_counter()
-        if request.mode != "keyword":
-            raise HTTPException(422, "Only keyword mode is currently available.")
+        if request.mode not in ("keyword", "vector"):
+            raise HTTPException(422, "Choose keyword or vector mode.")
         tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
         if not tokens:
             raise HTTPException(422, "Enter at least one word to search.")
         expression = " OR ".join('"' + token + '"' for token in tokens)
         with connect(path) as db:
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            rows = db.execute("""SELECT cards.*, bm25(card_fts) AS score
-                FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                WHERE card_fts MATCH ? ORDER BY score, cards.card_id LIMIT 20""", (expression,)).fetchall()
+            stage_start = perf_counter()
+            try:
+                rows = search_vectors(db, request.question, embedding_model) if request.mode == "vector" else db.execute("""SELECT cards.*, bm25(card_fts) AS score
+                    FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
+                    WHERE card_fts MATCH ? ORDER BY score, cards.card_id LIMIT 20""", (expression,)).fetchall()
+            except EmbeddingError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            stage_ms = (perf_counter() - stage_start) * 1000
         candidates = []
         for rank, row in enumerate(rows, 1):
             card = dict(row)
@@ -83,10 +92,11 @@ def create_app(db_path: Path | None = None, *, provider=None) -> FastAPI:
             card["rank"] = rank
             candidates.append(card)
         return {"trace_id": str(uuid4()), "question": request.question, "query": request.question,
-                "mode": "keyword", "filters": {}, "corpus": dict(corpus) if corpus else None,
-                "models": {}, "settings": {"keyword_candidates": 20, "evidence_limit": 8},
-                "stages": {"keyword": candidates}, "selected_evidence": candidates[:8],
-                "timings_ms": {"retrieval": (perf_counter() - start) * 1000},
+                "mode": request.mode, "filters": {}, "corpus": dict(corpus) if corpus else None,
+                "models": {"embedding": embedding_model.config} if request.mode == "vector" else {},
+                "settings": {"keyword_candidates": 20, "vector_candidates": 20, "evidence_limit": 8, "vector_metric": "cosine distance (lower is better)"},
+                "stages": {request.mode: candidates}, "selected_evidence": candidates[:8],
+                "timings_ms": {request.mode: stage_ms, "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},
                 "generation": generate_answer(provider, request.question, candidates[:8], str(uuid4())) if request.generate_answer else provider_status(provider)}
 
