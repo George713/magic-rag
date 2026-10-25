@@ -6,14 +6,15 @@ A local learning project for exploring retrieval augmented generation with **Mag
 
 ## Available workflows
 
-- A SvelteKit chat interface with streaming answers, conversation history, and a Stop button.
+- A dark SvelteKit conversation workspace with complete transcripts, automatic streamed answers, chat history, Stop, and Copy answer.
 - A Python FastAPI backend for ingestion, retrieval, local models, and remote answer generation.
 - One local SQLite database for card information, embeddings, conversations, and retrieval traces. No Docker or database server required.
 - Hybrid search: FTS5/BM25 keyword retrieval and sqlite-vec vector retrieval, followed by reciprocal rank fusion and a cross-encoder reranker.
-- A retrieval inspector showing the search query, filters, results from each search branch, fused rankings, reranking changes, and timings.
+- Expandable retrieval details beneath each answer showing its query, recorded filters, search branches, fused rankings, reranking changes, and timings.
+- Source-backed card images, both supplied faces, centered image previews, and optional model-selected card assets alongside answer text.
 - A small benchmark comparing keyword-only, vector-only, hybrid, and hybrid-plus-reranker retrieval.
 - Manual, versioned Scryfall imports that retain every card face and preserve the working corpus if a refresh fails.
-- Exact color/type/mana-value filters and contextual query rewriting with a visible submitted-text fallback when rewriting is unavailable.
+- Independent persistent filters per chat for exact colors, card types, mana value, and Legendary, plus contextual rewriting with a visible submitted-text fallback when unavailable.
 
 The first version focuses on **card discovery and card explanations**. Authoritative rules interactions, deck optimization, prices, and historical card wording are outside the initial scope.
 
@@ -53,6 +54,7 @@ Card data, model downloads, local databases, and credentials are kept outside Gi
 - [Complete corpus imports and long documents](docs/corpus-import.md)
 - [Vector search](docs/vector-search.md), [rank fusion](docs/hybrid-search.md), and [reranking](docs/reranking.md)
 - [Exact filters](docs/filters.md) and [saved conversations](docs/conversations.md)
+- [Conversational workspace and verification](docs/chat-workspace.md)
 - [Provider configuration](docs/providers.md), [streaming and Stop](docs/streaming.md), and [follow-up rewriting](docs/conversational-queries.md)
 - [Reviewed benchmark, metrics, and reports](docs/evaluation.md)
 - [Design and accepted decisions](docs/design.md)
