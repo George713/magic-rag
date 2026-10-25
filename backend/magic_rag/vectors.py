@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 import sqlite_vec
+from .filters import ExactFilters
 
 
 class Embedder(Protocol):
@@ -47,16 +48,18 @@ def store_vectors(db, documents: list[tuple[str, str]], embedder: Embedder):
     db.execute("INSERT INTO embedding_config VALUES (?)", (json.dumps(config, sort_keys=True),))
 
 
-def search_vectors(db, query: str, embedder: Embedder, limit: int = 20):
+def search_vectors(db, query: str, embedder: Embedder, limit: int = 20, filters: ExactFilters | None = None):
     saved = db.execute("SELECT config FROM embedding_config LIMIT 1").fetchone()
     if not saved:
         raise EmbeddingError("This corpus has no embeddings. Run the sample-vectors ingestion command first.")
     if json.loads(saved[0]) != embedder.config:
         raise EmbeddingError("Embedding configuration is incompatible with this corpus. Re-ingest cards with the configured model and settings.")
     vector = checked_vector(embedder.query(query), int(embedder.config["dimensions"]))
-    return db.execute("""SELECT cards.*, matches.distance AS score FROM
-        (SELECT card_id, distance FROM card_vectors WHERE embedding MATCH ? AND k = ?) matches
-        JOIN cards ON cards.card_id = matches.card_id ORDER BY score, cards.card_id""", (vector, limit)).fetchall()
+    eligibility, parameters = (filters or ExactFilters()).sql()
+    return db.execute(f"""SELECT cards.*, matches.distance AS score FROM
+        (SELECT card_id, distance FROM card_vectors WHERE embedding MATCH ? AND k = ?
+         AND card_id IN (SELECT cards.card_id FROM cards WHERE {eligibility})) matches
+        JOIN cards ON cards.card_id = matches.card_id ORDER BY score, cards.card_id""", (vector, limit, *parameters)).fetchall()
 
 
 class BgeEmbedder:
