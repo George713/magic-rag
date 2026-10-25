@@ -22,7 +22,7 @@ Each implementation issue should explain:
 - Observable acceptance criteria, including important failure cases.
 - The relevant design decisions and any unresolved prerequisites.
 
-GitHub remains the tracker; repository documents provide stable context rather than a competing task list. A detailed implementation backlog has not yet been published.
+GitHub remains the tracker; repository documents provide stable context rather than a competing task list. [Specification #1](https://github.com/George713/magic-rag/issues/1) links the published implementation issues and their native blocking relationships.
 
 ## Current planning references
 
