@@ -16,11 +16,9 @@ test('requested explanation preserves sources when the provider is unconfigured'
 });
 
 test('answer citations navigate to the exact selected card evidence', async ({ page }) => {
- await page.route('**/api/search', async route => {
-  const response = await route.fetch();
-  const trace = await response.json();
-  trace.generation = {status:'completed', message:'Answer grounded in selected card evidence.', text:'The transformed face has flying.', insufficient_evidence:false, citations:[{card_id:'sample-delver',name:'Delver of Secrets // Insectile Aberration'}]};
-  await route.fulfill({response, json:trace});
+ await page.route('**/api/conversations/*/turns/*/stream', async route => {
+  const generation = {status:'completed', message:'Answer grounded in selected card evidence.', text:'The transformed face has flying.', insufficient_evidence:false, citations:[{card_id:'sample-delver',name:'Delver of Secrets // Insectile Aberration'}]};
+  await route.fulfill({status:200,contentType:'application/x-ndjson',body:JSON.stringify({event:'done',generation})+'\n'});
  });
  await page.goto('/');
  await page.getByLabel('Include a cited explanation').check();

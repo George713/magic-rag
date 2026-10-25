@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from magic_rag.providers import generate_answer, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .conversations import register_conversations
+from .streaming import register_streaming
 
 
 def default_db_path() -> Path:
@@ -56,6 +57,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
+    register_streaming(app, conversations, provider)
     embedding_model = embedder or BgeEmbedder()
 
     @app.get("/api/provider")
