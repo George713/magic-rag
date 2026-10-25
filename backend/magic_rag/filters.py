@@ -15,6 +15,7 @@ class ExactFilters(BaseModel):
     model_config = ConfigDict(extra="forbid")
     colors: list[Color] | None = None
     card_types: list[CardType] = Field(default_factory=list)
+    legendary: bool = Field(default=False, strict=True)
     mana_value_min: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     mana_value_max: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
@@ -39,6 +40,9 @@ class ExactFilters(BaseModel):
         if self.card_types:
             clauses.append("has_card_types(cards.type_line, ?) = 1")
             parameters.append(json.dumps(self.card_types))
+        if self.legendary:
+            clauses.append("has_card_types(cards.type_line, ?) = 1")
+            parameters.append(json.dumps(["Legendary"]))
         if self.mana_value_min is not None:
             clauses.append("cards.mana_value >= ?")
             parameters.append(self.mana_value_min)
