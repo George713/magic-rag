@@ -247,3 +247,31 @@ def test_import_does_not_expose_non_https_image_or_source_urls(tmp_path):
         card = client.post("/api/search", json={"question":"Final ability"}).json()["selected_evidence"][0]
         assert card["images"] == []
         assert card["source_url"] is None
+
+
+def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restart(tmp_path):
+    class AssetProvider:
+        async def stream_answer(self, question, evidence, session_id, **kwargs):
+            yield {"result": {"assets": [evidence[0]["card_id"]]}}
+
+    source = FixtureSource()
+    metadata, records = source.snapshot()
+    records[0]["card_faces"][0]["image_uris"] = {"normal": "https://cards.example/front.jpg"}
+    records[0]["card_faces"][1]["image_uris"] = {"normal": "https://cards.example/back.jpg"}
+    source.snapshot = lambda: (metadata, records)
+    path = tmp_path / "assets.db"
+    with TestClient(create_app(path, embedder=ControlledEmbedder(), provider=AssetProvider(), corpus_source=source)) as client:
+        assert client.post("/api/corpus/import").status_code == 200
+        conversation_id = client.post("/api/conversations").json()["id"]
+        trace = client.post("/api/search", json={"question": "Final ability", "conversation_id": conversation_id}).json()
+        response = client.post(f"/api/conversations/{conversation_id}/turns/{trace['turn_id']}/stream")
+        answer = json.loads(response.text.splitlines()[-1])["generation"]
+        assert answer["status"] == "completed"
+        assert answer["assets"][0]["images"] == [{"name": "Front", "url": "https://cards.example/front.jpg"}, {"name": "Back", "url": "https://cards.example/back.jpg"}]
+        records[0]["card_faces"][0]["image_uris"]["normal"] = "https://cards.example/replacement.jpg"
+        source.snapshot = lambda: ({**metadata, "id": "new-images"}, records)
+        assert client.post("/api/corpus/import").status_code == 200
+    with TestClient(create_app(path)) as restarted:
+        saved = restarted.get(f"/api/conversations/{conversation_id}").json()["turns"][0]
+        assert saved["trace"]["generation"] == answer
+        assert saved["trace"]["selected_evidence"][0]["images"] == answer["assets"][0]["images"]

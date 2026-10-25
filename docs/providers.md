@@ -1,6 +1,6 @@
 # Remote card explanations
 
-Answer generation is optional. Select **Include a cited explanation** to generate from the exact selected evidence in the retrieval trace. Every citation links to that card's complete text. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
+Sending a message retrieves cards and requests a streamed answer from the exact selected evidence. Every citation links to that turn's complete card text. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
 
 The browser now uses [streamed saved-turn answers and Stop](streaming.md). The synchronous search option described below remains available to API clients.
 
@@ -28,6 +28,8 @@ There is no default endpoint, model, or paid service. The adapter implements Cha
 The UI's provider status comes from `GET /api/provider`. `POST /api/search` accepts `generate_answer: true` and uses whichever retrieval mode selected the evidence. `trace.generation` includes `status`, a safe message, and, on success, `text`, `insufficient_evidence`, and validated `{card_id,name}` citations. Unknown card citations, malformed answer payloads, and uncited supported answers fail explicitly while preserving evidence. Card text cannot establish every rules interaction; the prompt and UI state that explanations are not authoritative rulings. Validation establishes citation identity, not truth of generated claims; real-model review is still required.
 
 ## Validation
+
+The answer JSON contract accepts optional `text`, `citations`, `insufficient_evidence`, and `assets` (a list of selected-evidence card IDs). Text-only, assets-only, and combined responses are supported. Usable text or at least one selected asset is required; supported prose still requires citations. Unknown fields, invented IDs, and model-supplied image URLs fail validation. The service resolves assets to the turn's saved card metadata only after successful completion; partial or cancelled streams do not publish validated assets. Source metadata may be absent on older saved turns, which remain readable. Validation does not establish the truth of prose or the availability of external images.
 
 `uv run pytest backend/tests/test_generation.py` exercises the FastAPI seam with isolated real SQLite and deterministic provider substitutes, including the actual HTTP adapter with a substituted external transport. Browser tests cover unavailable-provider evidence retention and citation navigation. These tests do not establish remote model quality or live Go support.
 

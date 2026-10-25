@@ -1,6 +1,6 @@
 # Streaming and stopping answers
 
-Select **Include a cited explanation** and submit a question. Retrieval is saved first; its complete evidence stays visible while the answer streams. **Stop answer** ends generation promptly and retains the partial text with an explicit cancelled state. Partial or failed output has no validated citations and is never labelled completed. Reopening a conversation shows the saved state and original evidence.
+Send a message to retrieve evidence and automatically stream an answer. Retrieval is saved first; its complete evidence stays visible while the answer streams. **Stop** ends generation promptly and retains the partial text with an explicit cancelled state. Partial or failed output has no validated citations or assets and is never labelled completed. Reopening a conversation shows the saved state and original evidence. **Copy answer** copies displayed generated text; assets-only answers do not invent text for copying.
 
 The application supports one Python process per database. At startup, any `generating` turn left by an interrupted process becomes `cancelled`; committed partial text remains available. Stop aborts the active stream immediately and independently sends a cancellation request with a three-second timeout; a stalled cancellation endpoint cannot keep the provider stream open or overwrite a subsequent turn's status. Remote cancellation is best effort and cannot guarantee the provider stops billing immediately.
 

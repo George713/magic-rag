@@ -2,7 +2,7 @@
 
 With a configured, workload-approved provider, follow-up searches make a separate remote call to produce a standalone retrieval query. The original question remains the chat question and the answer-generation input. Keyword search, query embeddings, and cross-encoder reranking all receive the actual standalone query shown in the inspector.
 
-Rewriting uses the last six turns of the current conversation: original questions, previous actual queries, and completed answers when present. Failed/cancelled partial answers are omitted. This is conversational context, not verified card evidence. Retrieved card texts are supplied separately to answer generation; they are not copied into the rewrite request. Conversations never share history with one another.
+Rewriting uses the last six turns of the current conversation: original questions, previous actual queries, and completed answers when present. Completed selected card assets contribute bounded names and identities, so follow-ups can refer to cards shown without prose. Failed/cancelled partial answers and selections are omitted. This is conversational context, not verified card evidence. Retrieved card texts are supplied separately to answer generation; they are not copied into the rewrite request. Conversations never share history with one another.
 
 Answer generation also receives the actual query and a bounded frozen copy of earlier conversational context, separately from the selected card evidence. That snapshot is saved with retrieval and reused for both synchronous and streamed answers, so future turns cannot change an earlier answer's context. See [answer-context limits](providers.md).
 
@@ -14,7 +14,7 @@ The inspector and saved trace retain `question`, actual `query`, `rewrite.status
 
 Rewriting can only return a `query` string. Extra response fields, including proposed filters, invalidate the rewrite and trigger the transparent fallback. Explicit color/type/mana constraints remain independent of the provider.
 
-The browser resubmits its active controls on every search. API clients may omit `filters` to inherit the most recent turn's recorded constraints in that conversation; supplying `{}` explicitly clears them. A new conversation with omitted filters starts unconstrained. See [exact filter semantics](filters.md).
+The browser resubmits its active controls on every search. API clients may omit `filters` to use the conversation's persisted current controls; supplying `{}` explicitly clears them. A new conversation with omitted filters starts unconstrained. Historical turn snapshots do not determine current controls. See [exact filter semantics](filters.md).
 
 ## Provider and verification
 
