@@ -6,7 +6,6 @@ From the repository root in PowerShell:
 
 ```powershell
 uv sync --python 3.11
-uv run python -m magic_rag sample
 uv run python -m magic_rag serve
 ```
 
@@ -18,9 +17,9 @@ npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. Search `Lightning Bolt`, `Delver`, or `Flying`. The sample command installs three controlled cards, deliberately including a repeated printing and a card with two faces. This fixture is for repeatable behavior checks, not a complete or current card database. Repeating it replaces the sample atomically. It is not an importer for arbitrary external card data.
+Open http://127.0.0.1:5173. With an imported corpus, search `Lightning Bolt`, `Delver`, or `Flying`. If the database is empty, follow the [complete corpus import](corpus-import.md). The optional `uv run python -m magic_rag sample` command replaces the active corpus with three controlled cards, deliberately including a repeated printing and a card with two faces. Use an explicit `MAGIC_RAG_DB` pointing to a separate demo database for sample experiments so the full `data/cards.db` corpus is preserved. The fixture is for repeatable behavior checks, not a complete or current card database.
 
-The default database is `$HOME/.magic-rag/cards.db`, outside the checkout. Set `MAGIC_RAG_DB` in the Python terminal to override it. `MAGIC_RAG_API` in the SvelteKit process optionally changes the backend URL (default `http://127.0.0.1:8000`). Bindings are local-only. Provider credentials are not needed for retrieval. Without a suitable configured provider, generation and rewriting report their unavailable state and retrieval searches submitted text as-is. See [provider configuration](providers.md) before enabling remote requests.
+The default database is `data/cards.db` inside this project. Its path is anchored to the source checkout, so starting the backend from another working directory still uses the same file. The entire `data/` directory, database files, and SQLite WAL/SHM sidecars are ignored by Git. Set `MAGIC_RAG_DB` in the Python terminal only when intentionally overriding this location, such as for isolated tests. `MAGIC_RAG_API` in the SvelteKit process optionally changes the backend URL (default `http://127.0.0.1:8000`). Bindings are local-only. Provider credentials are not needed for retrieval. Without a suitable configured provider, generation and rewriting report their unavailable state and retrieval searches submitted text as-is. See [provider configuration](providers.md) before enabling remote requests.
 
 FTS5 uses Unicode word tokens joined with OR, treating punctuation and FTS syntax as ordinary input rather than exposing the FTS query language. BM25 scores sort ascending (more negative is better); canonical identity breaks ties. Default branch limits are 20 candidates and the evidence limit is 8; the interface exposes configurable settings. Every candidate retains complete readable text and structured properties. No-match and empty-corpus states remain usable. Additional modes require model acquisition and a compatible embedded corpus as described below.
 

@@ -8,6 +8,7 @@
 .codex/
 
 # Local datasets, databases, model caches, and experiment output
+# Includes the default data/cards.db and its SQLite WAL/SHM sidecars.
 /data/
 /models/
 /artifacts/

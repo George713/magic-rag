@@ -22,7 +22,8 @@ from .rewriting import conversation_context, freeze_answer_context, rewrite_quer
 
 
 def default_db_path() -> Path:
-    return Path(os.environ.get("MAGIC_RAG_DB", Path.home() / ".magic-rag" / "cards.db"))
+    project_root = Path(__file__).resolve().parents[2]
+    return Path(os.environ.get("MAGIC_RAG_DB", project_root / "data" / "cards.db"))
 
 
 @contextmanager
