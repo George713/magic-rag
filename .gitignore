@@ -1,4 +1,4 @@
-# Credentials and machine-local configuration
+﻿# Credentials and machine-local configuration
 .env
 .env.*
 !.env.example
@@ -47,3 +47,9 @@ coverage/
 .DS_Store
 Thumbs.db
 *.log
+
+# Worktrees and test caches
+.worktrees/
+.uv-cache/
+test-results/
+playwright-report/
