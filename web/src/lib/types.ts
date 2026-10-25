@@ -11,7 +11,7 @@ export interface Trace {
  filters: ExactFilters; corpus: {id: string; metadata: string} | null;
  models: Record<string, unknown>; settings: Record<string, unknown>;
  stages: Record<string, Card[]>; selected_evidence: Card[]; timings_ms: Record<string, number>;
- rewrite: {status: string; message: string}; generation: Generation;
+ rewrite: {status: string; message: string; elapsed_ms?: number}; generation: Generation;
 }
 export interface Generation {
  status: string; message: string; text?: string; insufficient_evidence?: boolean;

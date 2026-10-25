@@ -103,7 +103,7 @@
    </div></details>
   </form>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <div class="notice"><span>○</span><p>{providerMessage} Conversational rewriting is unavailable; your text is searched as-is.</p></div>
+  <div class="notice"><span>○</span><p>{providerMessage} <span data-testid="rewrite-message">{trace?.rewrite.message || "Start with a self-contained question. The inspector shows the query used."}</span></p></div>
   {#if trace && answerRequested}<Answer generation={trace.generation} />{/if}
   <section class="evidence" aria-live="polite" aria-busy={busy}>
    <div class="section-title"><h2>Retrieved evidence</h2><span>{trace ? `${trace.selected_evidence.length} cards` : 'Awaiting a question'}</span></div>
@@ -116,7 +116,7 @@
  </section>
  <aside aria-label="Retrieval inspector"><div class="eyebrow">02 / INSPECT</div><h2>The retrieval trail</h2><p class="aside-intro">The query, candidates, and evidence behind this search.</p>
   {#if trace}
-   <dl><dt>Actual search query</dt><dd data-testid="actual-query">{trace.query}</dd><dt>Mode</dt><dd>{trace.mode}</dd><dt>Active corpus</dt><dd>{trace.corpus?.id || 'No active corpus'}</dd><dt>Search filters</dt><dd data-testid="trace-filters">{describeFilters(trace.filters)}</dd><dt>Retrieval time</dt><dd>{trace.timings_ms.retrieval.toFixed(2)} ms</dd></dl>
+   <dl><dt>Original question</dt><dd data-testid="original-question">{trace.question}</dd><dt>Actual search query</dt><dd data-testid="actual-query">{trace.query}</dd><dt>Query rewriting</dt><dd data-testid="rewrite-status">{trace.rewrite.status}</dd><dt>Rewrite time</dt><dd>{trace.rewrite.elapsed_ms !== undefined ? `${trace.rewrite.elapsed_ms.toFixed(2)} ms` : "Not recorded"}</dd><dt>Mode</dt><dd>{trace.mode}</dd><dt>Active corpus</dt><dd>{trace.corpus?.id || 'No active corpus'}</dd><dt>Search filters</dt><dd data-testid="trace-filters">{describeFilters(trace.filters)}</dd><dt>Retrieval time</dt><dd>{trace.timings_ms.retrieval.toFixed(2)} ms</dd></dl>
    {#each Object.entries(trace.stages) as [stage, cards]}
     <h3 class="stage-title">{stage === 'reranked' ? 'Reranked' : stage === 'fused' ? 'Fused' : stage === 'vector' ? 'Vector' : 'Keyword'} candidates <span>{cards.length}</span></h3><p class="score-note">{stage === 'reranked' ? trace.settings.reranker_metric : stage === 'fused' ? trace.settings.fusion_metric : stage === 'vector' ? trace.settings.vector_metric : 'BM25 · lower scores rank first'}</p>
     <ol>{#each cards as card}<li><div><a href={`#card-${card.card_id}`}>{card.rank}. {card.name}</a>{#if card.fused_rank !== undefined}<p class="signals">Fused #{card.fused_rank} → #{card.rank} · {card.rank_change! > 0 ? `promoted ${card.rank_change}` : card.rank_change! < 0 ? `demoted ${-card.rank_change!}` : 'unchanged'}</p>{/if}{#if card.signals}<p class="signals">{#each Object.entries(card.signals) as [branch,signal]}<span>{branch} #{signal.rank} · {signal.score.toPrecision(4)}</span>{/each}</p>{/if}</div><code>{card.score.toPrecision(4)}</code></li>{/each}</ol>
