@@ -138,3 +138,46 @@ def test_provider_can_be_configured_without_selecting_a_default_service(tmp_path
     assert response.json()["status"] == "ready"
     assert "server-key" not in response.text
     assert "provider.example" not in response.text
+
+@pytest.mark.parametrize("payload", [
+    {"assets": ["sample-delver"]},
+    {"text": "Its transformed face has flying.", "citations": ["sample-delver"], "insufficient_evidence": False, "assets": ["sample-delver"]},
+])
+def test_selected_card_assets_complete_and_survive_restart(tmp_path, payload):
+    class AssetProvider:
+        def answer(self, *args, **kwargs):
+            return payload
+
+    path = tmp_path / "assets.db"
+    ingest_sample(path)
+    with TestClient(create_app(path, provider=AssetProvider())) as client:
+        conversation = client.post("/api/conversations").json()
+        trace = client.post("/api/search", json={"question": "Delver", "generate_answer": True, "conversation_id": conversation["id"]}).json()
+        answer = trace["generation"]
+        assert answer["status"] == "completed"
+        assert answer["assets"][0]["card_id"] == "sample-delver"
+        assert answer["assets"][0] == trace["selected_evidence"][0]
+        assert answer["text"] == payload.get("text", "")
+    with TestClient(create_app(path)) as restarted:
+        saved = restarted.get(f"/api/conversations/{conversation['id']}").json()
+        assert saved["turns"][0]["trace"]["generation"] == answer
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"text": "   "}, {"assets": ["invented-card"]},
+    {"assets": [{"card_id": "sample-delver", "url": "https://invented.example/card.png"}]},
+    {"assets": ["sample-delver"], "image_url": "https://invented.example/card.png"},
+    {"text": "An uncited claim", "assets": ["sample-delver"]},
+])
+def test_empty_or_untrusted_asset_answers_fail_without_losing_evidence(tmp_path, payload):
+    class InvalidAssetProvider:
+        def answer(self, *args, **kwargs):
+            return payload
+
+    path = tmp_path / "assets.db"
+    ingest_sample(path)
+    with TestClient(create_app(path, provider=InvalidAssetProvider())) as client:
+        trace = client.post("/api/search", json={"question": "Delver", "generate_answer": True}).json()
+        assert trace["generation"]["status"] == "failed"
+        assert not trace["generation"].get("assets")
+        assert trace["selected_evidence"][0]["card_id"] == "sample-delver"
