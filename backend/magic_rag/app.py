@@ -44,6 +44,8 @@ def connect(path: Path):
             text TEXT NOT NULL, mana_cost TEXT NOT NULL, mana_value REAL NOT NULL,
             colors TEXT NOT NULL, type_line TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS corpus (id TEXT PRIMARY KEY, metadata TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS card_images (card_id TEXT PRIMARY KEY,
+            images TEXT NOT NULL, source_url TEXT);
     """)
     try:
         with db:
@@ -135,6 +137,9 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 for rank, row in enumerate(rows, 1):
                     card = dict(row)
                     card["colors"] = json.loads(card["colors"])
+                    presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
+                    card["images"] = json.loads(presentation["images"]) if presentation else []
+                    card["source_url"] = presentation["source_url"] if presentation else None
                     card["rank"] = rank
                     stages[branch].append(card)
                 timings[branch] = (perf_counter() - stage_start) * 1000

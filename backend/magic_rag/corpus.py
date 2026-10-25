@@ -21,6 +21,24 @@ class CorpusError(ValueError):
     pass
 
 
+def source_url(value):
+    if not isinstance(value, str):
+        return None
+    parsed = urlparse(value)
+    return value if parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password else None
+
+
+def source_images(record, faces):
+    images = []
+    # A printing either has one complete image or separate face images.
+    for face in ([record] if record.get("image_uris") else faces):
+        variants = face.get("image_uris") or {}
+        url = source_url(variants.get("normal") or variants.get("large") or variants.get("png"))
+        if url:
+            images.append({"name":face.get("name", record["name"]), "url":url})
+    return images
+
+
 def normalize(record):
     card_id = record.get("oracle_id")
     if not isinstance(card_id, str) or not card_id:
@@ -52,7 +70,8 @@ def normalize(record):
         raise CorpusError(f"Missing canonical card type for {name}.")
     return {"card_id":card_id, "name":name, "text":"\n\n".join(text_parts),
             "mana_cost":record.get("mana_cost") or " // ".join(face.get("mana_cost", "") for face in faces),
-            "mana_value":float(mana_value), "colors":sorted(set(colors)), "type_line":type_line}
+            "mana_value":float(mana_value), "colors":sorted(set(colors)), "type_line":type_line,
+            "images":source_images(record, faces), "source_url":source_url(record.get("scryfall_uri"))}
 
 
 class LocalScryfallSource:
@@ -108,9 +127,11 @@ def import_corpus(connection, source, embedder):
         count += 1
         card = normalize(record)
         previous = cards.get(card["card_id"])
-        if previous is not None and previous != card:
+        canonical = lambda item: {key:value for key,value in item.items() if key not in {"images", "source_url"}}
+        if previous is not None and canonical(previous) != canonical(card):
             raise CorpusError(f'Conflicting canonical information for {card["card_id"]}.')
-        cards[card["card_id"]] = card
+        if previous is None:
+            cards[card["card_id"]] = card
     if not cards:
         raise CorpusError("Export contains no distinct cards; refusing to replace the working corpus.")
     documents = [(card["card_id"], card_document(card)) for card in cards.values()]
@@ -124,9 +145,12 @@ def import_corpus(connection, source, embedder):
         db.execute("BEGIN IMMEDIATE")
         db.execute("DELETE FROM card_fts")
         db.execute("DELETE FROM cards")
+        db.execute("DELETE FROM card_images")
         db.execute("DELETE FROM corpus")
         db.executemany("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?)", [
             (card["card_id"],card["name"],card["text"],card["mana_cost"],card["mana_value"],json.dumps(card["colors"]),card["type_line"]) for card in cards.values()])
+        db.executemany("INSERT INTO card_images VALUES (?, ?, ?)", [
+            (card["card_id"], json.dumps(card["images"]), card["source_url"]) for card in cards.values()])
         db.executemany("INSERT INTO card_fts VALUES (?, ?)", documents)
         write_vectors(db, config, vectors)
         for table in ("cards", "card_fts", "card_vectors"):
