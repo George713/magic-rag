@@ -1,0 +1,49 @@
+# Credentials and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+.codex/
+
+# Local datasets, databases, model caches, and experiment output
+/data/
+/models/
+/artifacts/
+/reports/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+.cache/
+.scratch/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# JavaScript and SvelteKit
+node_modules/
+.svelte-kit/
+build/
+dist/
+coverage/
+.pnpm-store/
+
+# Editor and OS output
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
