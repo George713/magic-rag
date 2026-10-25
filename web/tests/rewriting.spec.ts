@@ -1,0 +1,36 @@
+import {test,expect} from '@playwright/test';
+
+test('contextual followup shows standalone topic and keeps explicit filters, then falls back visibly',async ({page}) => {
+ await page.goto('/');
+ await page.getByLabel('Red',{exact:true}).check();
+ await page.getByLabel('Creature',{exact:true}).check();
+ await page.getByLabel('Maximum mana value',{exact:true}).fill('2');
+ await page.getByLabel('Your question').fill('Find artifact-sacrifice creatures');
+ await page.getByRole('button',{name:'Search cards'}).click();
+ await expect(page.getByTestId('actual-query')).toHaveText('Find artifact-sacrifice creatures');
+ await page.getByLabel('Your question').fill('Any cheaper ones?');
+ await page.getByRole('button',{name:'Search cards'}).click();
+ await expect(page.getByTestId('actual-query')).toHaveText('Atog artifact sacrifice cheaper creatures');
+ await expect(page.getByTestId('original-question')).toHaveText('Any cheaper ones?');
+ await expect(page.getByTestId('rewrite-status')).toHaveText('rewritten');
+ await expect(page.getByTestId('rewrite-message')).toContainText('Explicit filters are unchanged');
+ await expect(page.getByLabel('Red',{exact:true})).toBeChecked();
+ await expect(page.getByLabel('Maximum mana value',{exact:true})).toHaveValue('2');
+ await expect(page.getByRole('heading',{name:'Atog',exact:true})).toBeVisible();
+ await page.getByLabel('Your question').fill('simulate rewrite failure');
+ await page.getByRole('button',{name:'Search cards'}).click();
+ await expect(page.getByTestId('actual-query')).toHaveText('simulate rewrite failure');
+ await expect(page.getByTestId('rewrite-status')).toHaveText('unavailable');
+ await expect(page.getByTestId('rewrite-message')).toContainText('as-is');
+ await page.getByLabel('Your question').fill('Atog');
+ await page.getByRole('button',{name:'Search cards'}).click();
+ await expect(page.getByRole('heading',{name:'Atog',exact:true})).toBeVisible();
+ await page.reload();
+ await page.getByRole('button',{name:'Open conversation: Find artifact-sacrifice creatures',exact:true}).first().click();
+ await page.getByRole('button',{name:'View turn 2: Any cheaper ones?',exact:true}).click();
+ await expect(page.getByTestId('original-question')).toHaveText('Any cheaper ones?');
+ await expect(page.getByTestId('actual-query')).toHaveText('Atog artifact sacrifice cheaper creatures');
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+ await page.screenshot({path:'test-results/rewriting-mobile.png',fullPage:true});
+});
