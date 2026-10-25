@@ -1,6 +1,8 @@
 export interface Card {
  card_id: string; name: string; text: string; mana_cost: string; mana_value: number;
  colors: string[]; type_line: string; score: number; rank: number;
+ signals?: Record<string, {rank:number; score:number}>;
+ fused_rank?: number; fusion_score?: number; rank_change?: number;
 }
 export interface Trace {
  conversation_id?: string; turn_id?: string;
