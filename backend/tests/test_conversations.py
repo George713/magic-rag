@@ -133,3 +133,19 @@ def test_pre_extension_chat_inherits_latest_filters_without_rewriting_history(tm
         saved = client.get('/api/conversations/legacy').json()
         assert saved["current_filters"] == {"colors": ["R"]}
         assert saved["turns"][0]["trace"] == trace
+
+
+def test_search_uses_current_filters_without_restoring_old_turn_snapshot(tmp_path):
+    from magic_rag.ingest import ingest_sample
+    path = tmp_path / "current.db"
+    ingest_sample(path)
+    with TestClient(create_app(path)) as client:
+        conversation_id = client.post("/api/conversations").json()["id"]
+        first = client.post("/api/search", json={"question": "Delver", "conversation_id": conversation_id, "filters": {"colors": ["U"]}}).json()
+        assert client.get(f"/api/conversations/{conversation_id}").json()["current_filters"] == {"colors": ["U"]}
+        client.patch(f"/api/conversations/{conversation_id}", json={"filters": {"legendary": True}}).raise_for_status()
+        second = client.post("/api/search", json={"question": "Delver", "conversation_id": conversation_id}).json()
+        assert second["filters"] == {"legendary": True}
+        assert second["selected_evidence"] == []
+        saved = client.get(f"/api/conversations/{conversation_id}").json()
+        assert saved["turns"][0]["trace"]["filters"] == first["filters"] == {"colors": ["U"]}

@@ -23,6 +23,7 @@ def ingest_sample(path: Path, *, embedder: Embedder | None = None):
         documents = []
         db.execute("DELETE FROM card_fts")
         db.execute("DELETE FROM cards")
+        db.execute("DELETE FROM card_images")
         db.execute("DELETE FROM corpus")
         for card in {card["card_id"]: card for card in printings}.values():
             db.execute("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?)",

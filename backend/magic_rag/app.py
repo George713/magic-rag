@@ -44,6 +44,8 @@ def connect(path: Path):
             text TEXT NOT NULL, mana_cost TEXT NOT NULL, mana_value REAL NOT NULL,
             colors TEXT NOT NULL, type_line TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS corpus (id TEXT PRIMARY KEY, metadata TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS card_images (card_id TEXT PRIMARY KEY,
+            images TEXT NOT NULL, source_url TEXT);
     """)
     try:
         with db:
@@ -97,11 +99,13 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
     @app.post("/api/search")
     def search(request: SearchRequest):
         turns = []
+        conversation = None
         if request.conversation_id is not None:
-            turns = conversations.get(request.conversation_id)["turns"]
+            conversation = conversations.get(request.conversation_id)
+            turns = conversation["turns"]
         filters = request.filters
-        if turns and "filters" not in request.model_fields_set:
-            filters = ExactFilters.model_validate(turns[-1]["trace"]["filters"])
+        if conversation is not None and "filters" not in request.model_fields_set:
+            filters = ExactFilters.model_validate(conversation["current_filters"])
         start = perf_counter()
         if request.mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
             raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
@@ -135,6 +139,9 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 for rank, row in enumerate(rows, 1):
                     card = dict(row)
                     card["colors"] = json.loads(card["colors"])
+                    presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
+                    card["images"] = json.loads(presentation["images"]) if presentation else []
+                    card["source_url"] = presentation["source_url"] if presentation else None
                     card["rank"] = rank
                     stages[branch].append(card)
                 timings[branch] = (perf_counter() - stage_start) * 1000
@@ -161,6 +168,8 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 "answer_context":answer_context,
                 "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
+            if "filters" in request.model_fields_set:
+                conversations.update_filters(request.conversation_id, filters)
             conversations.append_trace(request.conversation_id, trace)
         return trace
 
