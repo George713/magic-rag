@@ -5,16 +5,18 @@ Requires Windows, Node.js 22+, and [uv](https://docs.astral.sh/uv/getting-starte
 From the repository root in PowerShell:
 
 ```powershell
-uv sync --python 3.11
-uv run python -m magic_rag serve
+.\start.cmd
 ```
 
-In another terminal:
+This starts both the Python backend and SvelteKit frontend in the same terminal, waits until they respond, and prints the interface URL. Open http://127.0.0.1:5173. Press **Ctrl+C** to stop both; if Windows asks whether to terminate the batch job, answer **Y**. If either server exits, the launcher stops the other one too. It never imports or replaces card data.
+
+Python dependencies (including local-model support) are managed by uv. On a fresh checkout, install frontend dependencies once with `npm.cmd --prefix web ci`. This checkout already has them installed. If a port is occupied, stop the existing server or use `.\start.cmd --backend-port 8002 --frontend-port 5174`; the launcher connects the frontend to the selected backend automatically. The command also works from another directory when invoked by its full path.
+
+To run the processes separately instead, use `uv run --extra models --python 3.11 python -m magic_rag serve` in the repository root and, in another terminal:
 
 ```powershell
 cd web
-npm ci
-npm run dev
+npm.cmd run dev
 ```
 
 Open http://127.0.0.1:5173. With an imported corpus, search `Lightning Bolt`, `Delver`, or `Flying`. If the database is empty, follow the [complete corpus import](corpus-import.md). The optional `uv run python -m magic_rag sample` command replaces the active corpus with three controlled cards, deliberately including a repeated printing and a card with two faces. Use an explicit `MAGIC_RAG_DB` pointing to a separate demo database for sample experiments so the full `data/cards.db` corpus is preserved. The fixture is for repeatable behavior checks, not a complete or current card database.
