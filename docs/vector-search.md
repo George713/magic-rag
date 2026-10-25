@@ -1,5 +1,7 @@
 # Local vector search
 
+The complete-document window policy in [corpus-import.md](corpus-import.md) supersedes the initial long-card rejection below. Queries still reject overlength; existing embeddings require rebuilding for the updated document policy.
+
 Keyword mode needs no model download. To add local BGE embeddings to the controlled sample, use PowerShell from the repository root:
 
 ```powershell

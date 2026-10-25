@@ -19,8 +19,7 @@ def test_real_bge_encoding_and_sqlite_vector_search(tmp_path):
         assert len(response.json()["selected_evidence"]) == 3
         assert response.json()["models"]["embedding"]["dimensions"] == 384
         assert len(response.json()["models"]["embedding"]["revision"]) == 40
-    with pytest.raises(EmbeddingError, match="not truncated"):
-        model.document("ability " * 600)
+    assert len(model.document("ability " * 600 + " final ability")) == 384
     with pytest.raises(EmbeddingError, match="not truncated"):
         model.query("ability " * 600)
 
@@ -38,7 +37,6 @@ def test_real_cross_encoder_reranks_and_rejects_oversized_pairs(tmp_path):
         assert len(trace["stages"]["reranked"]) == 3
         assert len(trace["models"]["reranker"]["revision"]) == 40
         assert trace["models"]["embedding"]["model"] != trace["models"]["reranker"]["model"]
-    with pytest.raises(RerankingError, match="not truncated"):
-        reranker.score("query", ["ability " * 600])
+    assert len(reranker.score("query", ["ability " * 600 + " final ability"])) == 1
     with pytest.raises(RerankingError, match="not truncated"):
         reranker.score("query " * 600, ["short evidence"])
