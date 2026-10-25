@@ -4,9 +4,14 @@ export interface Card {
  signals?: Record<string, {rank:number; score:number}>;
 }
 export interface Trace {
+ conversation_id?: string; turn_id?: string;
  trace_id: string; question: string; query: string; mode: string;
  filters: Record<string, unknown>; corpus: {id: string; metadata: string} | null;
  models: Record<string, unknown>; settings: Record<string, unknown>;
  stages: Record<string, Card[]>; selected_evidence: Card[]; timings_ms: Record<string, number>;
- rewrite: {status: string; message: string}; generation: {status: string; message: string};
+ rewrite: {status: string; message: string}; generation: Generation;
+}
+export interface Generation {
+ status: string; message: string; text?: string; insufficient_evidence?: boolean;
+ citations?: {card_id: string; name: string}[];
 }

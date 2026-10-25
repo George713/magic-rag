@@ -52,3 +52,21 @@ def test_empty_keyword_branch_keeps_vector_evidence_without_invented_signals(tmp
         assert abs(trace["selected_evidence"][0]["score"] - 0.01639344262295082) < 1e-12
         assert all(card["signals"].keys() == {"vector"} for card in trace["stages"]["fused"])
         assert client.post("/api/search", json={"question":"Sol", "settings":{"vector_candidates":0}}).status_code == 422
+
+
+def test_saved_hybrid_turn_and_provider_share_the_same_limited_evidence(tmp_path):
+    path = tmp_path / "cards.db"
+    model = ControlledEmbedder()
+    ingest_sample(path, embedder=model)
+    class EvidenceProvider:
+        def answer(self, question, evidence, session_id):
+            assert len(evidence) == 1
+            assert evidence[0]["card_id"] == "sample-sol-ring"
+            return {"text":"This card produces mana.", "citations":["sample-sol-ring"], "insufficient_evidence":False}
+    with TestClient(create_app(path, embedder=model, provider=EvidenceProvider())) as client:
+        conversation = client.post("/api/conversations").json()
+        trace = client.post("/api/search", json={"question":"Sol Ring", "mode":"hybrid", "generate_answer":True,
+            "conversation_id":conversation["id"], "settings":{"evidence_limit":1}}).json()
+        assert trace["generation"]["status"] == "completed"
+        saved = client.get(f'/api/conversations/{conversation["id"]}').json()["turns"][0]["trace"]
+        assert saved == trace

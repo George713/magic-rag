@@ -9,8 +9,10 @@ from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from magic_rag.providers import generate_answer, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .retrieval import fuse
+from .conversations import register_conversations
 
 
 def default_db_path() -> Path:
@@ -52,14 +54,22 @@ class SearchRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     mode: str = "keyword"
     settings: RetrievalSettings = Field(default_factory=RetrievalSettings)
+    generate_answer: bool = False
+    conversation_id: str | None = None
 
 
-def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None) -> FastAPI:
+def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, provider=None) -> FastAPI:
+    provider = provider if provider is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path):
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
+    conversations = register_conversations(app, lambda: connect(path))
     embedding_model = embedder or BgeEmbedder()
+
+    @app.get("/api/provider")
+    def configured_provider():
+        return provider_status(provider)
 
     @app.get("/api/health")
     def health():
@@ -70,6 +80,8 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None)
 
     @app.post("/api/search")
     def search(request: SearchRequest):
+        if request.conversation_id is not None:
+            conversations.get(request.conversation_id)
         start = perf_counter()
         if request.mode not in ("keyword", "vector", "hybrid"):
             raise HTTPException(422, "Choose keyword, vector, or hybrid mode.")
@@ -102,13 +114,17 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None)
             stages["fused"] = fuse(stages, request.settings.rrf_constant)
             timings["fusion"] = (perf_counter() - fusion_start) * 1000
         candidates = stages["fused" if request.mode == "hybrid" else request.mode]
-        return {"trace_id": str(uuid4()), "question": request.question, "query": request.question,
+        trace_id = str(uuid4())
+        trace = {"trace_id": trace_id, "question": request.question, "query": request.question,
                 "mode": request.mode, "filters": {}, "corpus": dict(corpus) if corpus else None,
                 "models": {"embedding": embedding_model.config} if request.mode != "keyword" else {},
                 "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
                 "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},
-                "generation": {"status": "unconfigured", "message": "Remote generation is not configured."}}
+                "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id) if request.generate_answer else provider_status(provider)}
+        if request.conversation_id is not None:
+            conversations.append_trace(request.conversation_id, trace)
+        return trace
 
     return app
