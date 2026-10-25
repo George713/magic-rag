@@ -2,6 +2,7 @@ import type { ExactFilters } from './filters';
 export interface Card {
  card_id: string; name: string; text: string; mana_cost: string; mana_value: number;
  colors: string[]; type_line: string; score: number; rank: number;
+ images?: {name: string; url: string}[]; source_url?: string | null;
  signals?: Record<string, {rank:number; score:number}>;
  fused_rank?: number; fusion_score?: number; rank_change?: number;
 }
@@ -17,4 +18,5 @@ export interface Trace {
 export interface Generation {
  status: string; message: string; text?: string; insufficient_evidence?: boolean;
  citations?: {card_id: string; name: string}[];
+ assets?: Card[];
 }
