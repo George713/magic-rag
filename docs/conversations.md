@@ -1,6 +1,8 @@
 # Saved conversations
 
-The first browser search creates a local conversation automatically. **New conversation** creates a fresh chat. Use a conversation title to reopen its most recent turn, then select an earlier question to inspect its original evidence. Delete removes that conversation and all its turns. These changes survive service and browser restarts.
+The first submitted message creates a local conversation automatically. **New chat** starts a fresh unrestricted chat. Use a conversation title in the left sidebar to reopen its complete ordered transcript. Each answer has expandable Retrieval details for its original query, filters, candidates, scores, and timings. The right sidebar holds controls for the next message. Delete removes that conversation and all its turns. These changes survive service and browser restarts.
+
+Current filters are persisted independently for each chat, including edits made without sending another message. Historical turns keep immutable snapshots; opening their details never changes current controls. Source images and completed asset selections are also snapshots, so refreshing the corpus does not change historical answers. Older saved turns without imagery remain readable.
 
 Conversations share the configured `MAGIC_RAG_DB` SQLite database with card retrieval. Historical turns contain complete retrieval trace snapshots, including original question, actual query, filters, candidates, selected readable evidence, corpus/model configuration, stage timings, and provider/rewrite status. Reopening never searches the current corpus. Refreshing or replacing the corpus therefore does not rewrite old evidence.
 
@@ -11,6 +13,7 @@ Retrieval works without a remote provider. A saved turn has state `retrieval_com
 - `POST /api/conversations` creates a conversation and returns its detail with status 201.
 - `GET /api/conversations` lists summaries, most recently updated first.
 - `GET /api/conversations/{id}` returns the conversation and ordered turns.
+- `PATCH /api/conversations/{id}` accepts `{ "filters": { ... } }` and saves validated current filters independently of turns. Conversation details expose `current_filters`.
 - `DELETE /api/conversations/{id}` deletes its history and returns status 204.
 - `POST /api/search` accepts optional `conversation_id`. The response adds `conversation_id` and `turn_id` and saves that exact trace. Omitting the ID leaves standalone retrieval available without saving a turn. Unknown/deleted IDs return 404, and invalid searches do not create turns.
 
