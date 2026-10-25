@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from .app import connect
+from .vectors import Embedder, store_vectors
 
 
 SAMPLE = [
@@ -15,10 +16,11 @@ SAMPLE = [
 ]
 
 
-def ingest_sample(path: Path):
+def ingest_sample(path: Path, *, embedder: Embedder | None = None):
     # Repeated printing deliberately shares the canonical identity.
     printings = SAMPLE + [SAMPLE[1].copy()]
     with connect(path) as db:
+        documents = []
         db.execute("DELETE FROM card_fts")
         db.execute("DELETE FROM cards")
         db.execute("DELETE FROM corpus")
@@ -28,5 +30,11 @@ def ingest_sample(path: Path):
                         card["mana_value"], json.dumps(card["colors"]), card["type_line"]))
             document = "\n".join([card["name"], card["mana_cost"], card["type_line"], " ".join(card["colors"]), card["text"]])
             db.execute("INSERT INTO card_fts VALUES (?, ?)", (card["card_id"], document))
+            documents.append((card["card_id"], document))
+        if embedder:
+            store_vectors(db, documents, embedder)
+        else:
+            db.execute("DROP TABLE IF EXISTS card_vectors")
+            db.execute("DELETE FROM embedding_config")
         db.execute("INSERT INTO corpus VALUES (?, ?)", ("controlled-sample-v1", json.dumps({"source": "controlled fixture", "card_count": 3})))
     return {"corpus_id": "controlled-sample-v1", "card_count": 3}
