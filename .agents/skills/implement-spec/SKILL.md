@@ -1,11 +1,11 @@
 ---
-name: magic-rag-implement-spec
+name: implement-spec
 description: "Implement a Magic RAG specification and its GitHub tickets with coordinated worktrees and a verified issue handoff."
 ---
 
-# Magic RAG: Implement Spec
+# Implement Spec (repo version)
 
-Repository-local adaptation of Matt Pocock's `implement-spec` workflow. Keep one integration branch for the specification, use its ticket dependency graph, and finish with review-ready code and accurate GitHub issue status. Invoke this version as `$magic-rag-implement-spec`; the global `$implement-spec` remains separate.
+Repository-local adaptation of Matt Pocock's `implement-spec` workflow. Keep one integration branch for the specification, use its ticket dependency graph, and finish with review-ready code and accurate GitHub issue status. Invoke this version as `$implement-spec` and select **Implement Spec (repo version)** in the UI. The repository pointer selects this local copy; the global skill remains unchanged.
 
 1. Read the repository's [tracker conventions](../../../docs/agents/issue-tracker.md), the requested spec, and its implementation issues. Record the integration branch's starting commit as the review baseline. Resolve missing scope or dependencies before dispatching dependent work.
 2. Plan ownership using [implementation coordination](../../../docs/agents/implementation.md). Establish the shared response/registration contracts before parallel edits to the same integration files. Store only temporary coordination state under `.scratch/implementation/`; GitHub remains the work tracker.

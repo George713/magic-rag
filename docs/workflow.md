@@ -45,7 +45,7 @@ Ready for human review in [PR #13](https://github.com/George713/magic-rag/pull/1
 
 The audit checks handoff structure, not the truth of implementation claims or whether a limitation is acceptable. The implementer and reviewer still assess those individually.
 
-For multi-ticket execution, invoke the repository-local `$magic-rag-implement-spec` (UI label **Magic RAG: Implement Spec**). Its [coordination reference](agents/implementation.md) defines ownership and merge handoffs; global skills remain unchanged.
+For multi-ticket execution, invoke the repository-local `$implement-spec` (UI label **Implement Spec (repo version)**). Its [coordination reference](agents/implementation.md) defines ownership and merge handoffs; global skills remain unchanged.
 
 ## Issue content
 

@@ -4,7 +4,7 @@
 
 ### Spec implementation
 
-For this repository's coordinated implementation workflow, use the local [magic-rag-implement-spec skill](.agents/skills/magic-rag-implement-spec/SKILL.md).
+For `/implement-spec`, use this repository's version in [.agents/skills/implement-spec/SKILL.md](.agents/skills/implement-spec/SKILL.md).
 
 ### Issue tracker
 

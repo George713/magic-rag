@@ -1,6 +1,6 @@
 # Implementation coordination
 
-The repository-local `$magic-rag-implement-spec` adapts the integration-branch workflow for this project's shared application files and GitHub tracker. Use these rules when coordinating its workers.
+The repository-local `$implement-spec` adapts the integration-branch workflow for this project's shared application files and GitHub tracker. Use these rules when coordinating its workers.
 
 ## Ownership before parallelism
 

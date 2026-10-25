@@ -1,7 +1,0 @@
-interface:
-  display_name: "Magic RAG: Implement Spec"
-  short_description: "Repo workflow for parallel tickets and issue handoff"
-  default_prompt: "Use $magic-rag-implement-spec to implement the linked specification and tickets in this repository."
-
-policy:
-  allow_implicit_invocation: false
