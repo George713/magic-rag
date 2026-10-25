@@ -39,4 +39,4 @@ The CLI writes JSON and a sibling Markdown report outside version control. JSON 
 
 ## Verification
 
-`uv run pytest backend/tests/test_evaluation.py` uses the FastAPI seam with isolated real SQLite/sqlite-vec and controlled embedding/reranking providers. Independently worked examples check rank-two reciprocal rank and discounted gain, reranking changes, empty rankings, exact filters, unsupported exclusions, input validation, and report provenance. Deterministic substitutes establish contract behavior, not Magic relevance. The real full-corpus benchmark is documented separately once completed.
+`uv run pytest backend/tests/test_evaluation.py` uses the FastAPI seam with isolated real SQLite/sqlite-vec and controlled embedding/reranking providers. Independently worked examples check rank-two reciprocal rank and discounted gain, reranking changes, empty rankings, exact filters, unsupported exclusions, input validation, and report provenance. Deterministic substitutes establish contract behavior, not Magic relevance. See the separate [real full-corpus run and pooled review](evaluation-smoke.md).

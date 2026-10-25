@@ -5,8 +5,19 @@ from .app import create_app, default_db_path, connect
 from .ingest import ingest_sample
 from .vectors import BgeEmbedder
 from .corpus import import_corpus, LocalScryfallSource, ScryfallSource
-from .evaluation import BenchmarkRequest, write_report
+from .evaluation import write_report
 from pathlib import Path
+import anyio
+import httpx
+
+
+async def benchmark_application(payload):
+    # Use the same ASGI boundary as a server request, including AnyIO worker context.
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app()), base_url="http://magic-rag.local", timeout=None) as client:
+        response = await client.post("/api/benchmark", json=payload)
+        if not response.is_success:
+            raise ValueError(response.json().get("detail", "Benchmark request failed."))
+        return response.json()
 
 parser = argparse.ArgumentParser(description="Local Magic retrieval")
 parser.add_argument("command", choices=["serve", "sample", "sample-vectors", "import", "benchmark"])
@@ -25,7 +36,7 @@ if args.command == "benchmark":
             payload["suite"] = json.loads(Path(args.benchmark_suite).read_text(encoding="utf-8-sig"))
         if args.settings:
             payload["settings"] = json.loads(Path(args.settings).read_text(encoding="utf-8-sig"))
-        report = create_app().state.benchmark(BenchmarkRequest.model_validate(payload))
+        report = anyio.run(benchmark_application, payload)
         print(json.dumps({"outputs":write_report(report, args.output), "corpus":report["corpus"], "aggregates":report["aggregates"]}))
     except Exception as exc:
         parser.exit(1, f"Benchmark failed: {getattr(exc, 'detail', str(exc))}\n")

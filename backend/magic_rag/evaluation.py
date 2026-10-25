@@ -218,4 +218,3 @@ def register_evaluation(app, search, search_request):
     def benchmark(request: BenchmarkRequest, format: Literal["json", "markdown"] = "json"):
         report = run_benchmark(request, search, search_request)
         return PlainTextResponse(render_markdown(report), media_type="text/markdown") if format == "markdown" else report
-    app.state.benchmark = benchmark
