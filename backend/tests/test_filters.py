@@ -6,12 +6,19 @@ from magic_rag.ingest import ingest_sample
 from test_vectors import ControlledEmbedder
 
 
-@pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid"])
+class FilterReranker:
+    config = {"model": "filter-test-reranker", "revision": "1"}
+
+    def score(self, query, documents):
+        return [1.0 for document in documents]
+
+
+@pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid", "hybrid_rerank"])
 def test_exact_filters_limit_candidates_before_each_branch_ranks(tmp_path, mode):
     path = tmp_path / "cards.db"
     model = ControlledEmbedder()
     ingest_sample(path, embedder=model)
-    with TestClient(create_app(path, embedder=model)) as client:
+    with TestClient(create_app(path, embedder=model, reranker=FilterReranker())) as client:
         response = client.post("/api/search", json={
             "question": "Sol Ring Delver", "mode": mode,
             "filters": {"colors": ["U"], "card_types": ["Creature"], "mana_value_min": 1, "mana_value_max": 1},
@@ -46,7 +53,7 @@ def seed_filter_fixture(path):
         store_vectors(db, [(row[0], row[1]) for row in fixtures], ControlledEmbedder())
 
 
-@pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid"])
+@pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid", "hybrid_rerank"])
 @pytest.mark.parametrize("filters, expected", [
     ({"colors": []}, {"colorless"}),
     ({"colors": ["R"]}, {"red"}),
@@ -60,7 +67,7 @@ def seed_filter_fixture(path):
 def test_exact_color_type_and_inclusive_fractional_mana_boundaries(tmp_path, mode, filters, expected):
     path = tmp_path / "cards.db"
     seed_filter_fixture(path)
-    with TestClient(create_app(path, embedder=ControlledEmbedder())) as client:
+    with TestClient(create_app(path, embedder=ControlledEmbedder(), reranker=FilterReranker())) as client:
         response = client.post("/api/search", json={"question": "fixture", "mode": mode, "filters": filters})
         assert response.status_code == 200
         for stage in response.json()["stages"].values():

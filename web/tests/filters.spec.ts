@@ -12,11 +12,13 @@ test('filters constrain vector evidence, persist across turns, and clear without
  await expect(page.getByRole('heading',{name:'Sol Ring',exact:true})).toHaveCount(0);
  await expect(page.getByTestId('trace-filters')).toContainText('Blue');
  await expect(page.getByTestId('trace-filters')).toContainText('Creature');
+ await page.getByLabel('Search mode',{exact:true}).selectOption('hybrid_rerank');
  await page.getByLabel('Your question').fill('Any cheaper ones');
  await page.getByRole('button',{name:'Search cards'}).click();
  await expect(page.getByTestId('actual-query')).toHaveText('Any cheaper ones');
  await expect(page.getByRole('group',{name:'Exact filters'}).getByLabel('Blue',{exact:true})).toBeChecked();
  await expect(page.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:/Reranked candidates/})).toBeVisible();
  await page.getByLabel('Minimum mana value',{exact:true}).fill('2');
  await page.getByLabel('Maximum mana value',{exact:true}).fill('3');
  await page.getByRole('button',{name:'Search cards'}).click();

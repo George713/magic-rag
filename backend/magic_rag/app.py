@@ -13,6 +13,7 @@ from magic_rag.providers import generate_answer, provider_status, provider_from_
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .retrieval import fuse
 from .conversations import register_conversations
+from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 
 
