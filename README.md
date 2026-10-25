@@ -53,7 +53,7 @@ Card data, model downloads, local databases, and credentials are kept outside Gi
 - [Complete corpus imports and long documents](docs/corpus-import.md)
 - [Vector search](docs/vector-search.md), [rank fusion](docs/hybrid-search.md), and [reranking](docs/reranking.md)
 - [Exact filters](docs/filters.md) and [saved conversations](docs/conversations.md)
-- [Provider configuration](docs/providers.md), [streaming and Stop](docs/streaming.md), and [follow-up rewriting](docs/rewriting.md)
+- [Provider configuration](docs/providers.md), [streaming and Stop](docs/streaming.md), and [follow-up rewriting](docs/conversational-queries.md)
 - [Reviewed benchmark, metrics, and reports](docs/evaluation.md)
 - [Design and accepted decisions](docs/design.md)
 - [Domain glossary](GLOSSARY.md)

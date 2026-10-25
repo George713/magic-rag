@@ -6,6 +6,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 from contextlib import contextmanager
+from anyio import from_thread
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +18,7 @@ from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 from .evaluation import register_evaluation
+from .rewriting import conversation_context, rewrite_query
 
 
 def default_db_path() -> Path:
@@ -91,16 +93,24 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
 
     @app.post("/api/search")
     def search(request: SearchRequest):
+        turns = []
         if request.conversation_id is not None:
-            conversations.get(request.conversation_id)
+            turns = conversations.get(request.conversation_id)["turns"]
+        filters = request.filters
+        if turns and "filters" not in request.model_fields_set:
+            filters = ExactFilters.model_validate(turns[-1]["trace"]["filters"])
         start = perf_counter()
         if request.mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
             raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
         tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
         if not tokens:
             raise HTTPException(422, "Enter at least one word to search.")
+        trace_id = str(uuid4())
+        query, rewrite = from_thread.run(rewrite_query, provider, request.question,
+                                        conversation_context(turns), request.conversation_id or trace_id)
+        tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
         expression = " OR ".join('"' + token + '"' for token in tokens)
-        eligibility, filter_parameters = request.filters.sql()
+        eligibility, filter_parameters = filters.sql()
         stages = {}
         timings = {}
         with connect(path) as db:
@@ -109,7 +119,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
             for branch in branches:
                 stage_start = perf_counter()
                 try:
-                    rows = search_vectors(db, request.question, embedding_model, request.settings.vector_candidates, request.filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
+                    rows = search_vectors(db, query, embedding_model, request.settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
                         FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
                         WHERE card_fts MATCH ? AND {eligibility} ORDER BY score, cards.card_id LIMIT ?""", (expression, *filter_parameters, request.settings.keyword_candidates)).fetchall()
                 except EmbeddingError as exc:
@@ -129,19 +139,18 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         if request.mode == "hybrid_rerank":
             rerank_start = perf_counter()
             try:
-                stages["reranked"] = rerank(request.question, candidates[:request.settings.rerank_candidates], reranking_model)
+                stages["reranked"] = rerank(query, candidates[:request.settings.rerank_candidates], reranking_model)
             except RerankingError as exc:
                 raise HTTPException(422, str(exc)) from exc
             candidates = stages["reranked"]
             timings["reranking"] = (perf_counter() - rerank_start) * 1000
-        trace_id = str(uuid4())
-        trace = {"trace_id": trace_id, "question": request.question, "query": request.question,
-                "mode": request.mode, "filters": request.filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
+        trace = {"trace_id": trace_id, "question": request.question, "query": query,
+                "mode": request.mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
                 "models": {**({"embedding": embedding_model.config} if request.mode != "keyword" else {}), **({"reranker":reranking_model.config} if request.mode == "hybrid_rerank" else {})},
                 "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
-                "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000},
-                "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},
+                "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
+                "rewrite": rewrite,
                 "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
             conversations.append_trace(request.conversation_id, trace)
