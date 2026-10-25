@@ -13,6 +13,40 @@ GitHub Issues is the source of truth for requests, specifications, and implement
 
 Research uncertainties, such as provider suitability or dataset export compatibility, should be explicit prerequisites for the work they block. Keep unresolved questions visible rather than treating them as accepted implementation facts.
 
+## Implementation handoff
+
+Before reporting implementation complete or marking a PR ready for review:
+
+1. Review each acceptance criterion against implementation and verification evidence. Check only satisfied criteria; a recorded limitation is not proof of live-provider support. Keep unfinished criteria unchecked and explain each one inline with `Blocked: <reason>` or `Deferred: <agreed decision or follow-up>`. Deferral requires agreement in the spec or with the user. A blocked required criterion means the spec is only partially implemented, even if the audit passes.
+2. Give each open closing issue an `## Implementation status` section linking the implementing PR. State whether the change is implemented, awaiting merge, or limited by an external prerequisite. Include a `## Verification evidence` section with links to test results, source, or documentation. The existing inline `Implementation and verification evidence: ...` format is also accepted.
+3. Change the current triage role to `ready-for-human` when implementation is handed over for review or a documented human decision. Preserve unrelated labels and remove stale triage roles. Keep issues open until the change lands.
+4. Run the read-only audit from the repository root, including while the PR is still a draft:
+
+   ```powershell
+   uv run --python 3.11 python scripts/check_issue_handoff.py --pr 13
+   ```
+
+   Replace `13` with the actual PR number. The command follows GitHub's native closing references, reads issue bodies/labels, and reports missing PR/status/evidence, stale or conflicting triage roles, and unexplained unchecked criteria. Exit codes are 0 for a structurally complete handoff, 1 for findings, and 2 when data cannot be obtained or parsed. `--json` emits a machine-readable report; `--snapshot <file>` checks saved `{pr, issues}` JSON without network access. No issue, label, checkbox, or PR is changed by the audit.
+5. Resolve the findings, mark the PR ready, and rerun the audit to verify the actual review-ready state. Report any publication blocker or incomplete requirement explicitly.
+
+An issue can use this handoff structure:
+
+```markdown
+## Implementation status
+Ready for human review in [PR #13](https://github.com/George713/magic-rag/pull/13); not merged yet.
+
+## Verification evidence
+- [Implementation and verification notes](https://github.com/George713/magic-rag/blob/<commit>/docs/running.md)
+
+## Acceptance criteria
+- [x] Verified behavior, supported by the evidence above.
+- [ ] Run the approved live-provider smoke. **Blocked:** awaiting workload approval and credentials.
+```
+
+The audit checks handoff structure, not the truth of implementation claims or whether a limitation is acceptable. The implementer and reviewer still assess those individually.
+
+For multi-ticket execution, invoke the repository-local `$magic-rag-implement-spec` (UI label **Magic RAG: Implement Spec**). Its [coordination reference](agents/implementation.md) defines ownership and merge handoffs; global skills remain unchanged.
+
 ## Issue content
 
 Each implementation issue should explain:

@@ -8,5 +8,6 @@ Specifications and implementation issues live in [George713/magic-rag](https://g
 - Apply or remove a triage label with `gh issue edit <number> --add-label <label>` or `--remove-label <label>` using the configured mapping.
 - Use parent/sub-issue relationships for a spec and its implementation slices. Record blockers through native issue dependencies where available; otherwise include `Part of #<parent>` and `Blocked by: #<number>` in the issue body.
 - Keep implementation issues demonstrable and scoped to a focused session. See [the workflow](../workflow.md).
+- Before handing implementation to human review, follow the [handoff completion criterion and read-only audit](../workflow.md#implementation-handoff).
 
 **PRs as a request surface: no.** Pull requests implement tracked work; external PRs are not automatically treated as requests in the triage queue.
