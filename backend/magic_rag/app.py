@@ -13,7 +13,7 @@ from magic_rag.providers import generate_answer, provider_status, provider_from_
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .retrieval import fuse
 from .conversations import register_conversations
-from .filters import ExactFilters, register_filter_functions
+from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 
 
 def default_db_path() -> Path:
@@ -50,6 +50,7 @@ class RetrievalSettings(BaseModel):
     vector_candidates: int = Field(default=20, ge=1, le=1000)
     rrf_constant: int = Field(default=60, ge=0, le=10000)
     evidence_limit: int = Field(default=8, ge=1, le=1000)
+    rerank_candidates: int = Field(default=40, ge=1, le=1000)
 
 
 class SearchRequest(BaseModel):
@@ -61,7 +62,7 @@ class SearchRequest(BaseModel):
     filters: ExactFilters = Field(default_factory=ExactFilters)
 
 
-def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, provider=None) -> FastAPI:
+def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None) -> FastAPI:
     provider = provider if provider is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path):
@@ -69,6 +70,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
     embedding_model = embedder or BgeEmbedder()
+    reranking_model = reranker or MiniLmReranker()
 
     @app.get("/api/provider")
     def configured_provider():
@@ -86,8 +88,8 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         if request.conversation_id is not None:
             conversations.get(request.conversation_id)
         start = perf_counter()
-        if request.mode not in ("keyword", "vector", "hybrid"):
-            raise HTTPException(422, "Choose keyword, vector, or hybrid mode.")
+        if request.mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
+            raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
         tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
         if not tokens:
             raise HTTPException(422, "Enter at least one word to search.")
@@ -97,7 +99,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         timings = {}
         with connect(path) as db:
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            branches = ("keyword", "vector") if request.mode == "hybrid" else (request.mode,)
+            branches = ("keyword", "vector") if request.mode in ("hybrid", "hybrid_rerank") else (request.mode,)
             for branch in branches:
                 stage_start = perf_counter()
                 try:
@@ -113,16 +115,24 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                     card["rank"] = rank
                     stages[branch].append(card)
                 timings[branch] = (perf_counter() - stage_start) * 1000
-        if request.mode == "hybrid":
+        if request.mode in ("hybrid", "hybrid_rerank"):
             fusion_start = perf_counter()
             stages["fused"] = fuse(stages, request.settings.rrf_constant)
             timings["fusion"] = (perf_counter() - fusion_start) * 1000
-        candidates = stages["fused" if request.mode == "hybrid" else request.mode]
+        candidates = stages["fused" if request.mode in ("hybrid", "hybrid_rerank") else request.mode]
+        if request.mode == "hybrid_rerank":
+            rerank_start = perf_counter()
+            try:
+                stages["reranked"] = rerank(request.question, candidates[:request.settings.rerank_candidates], reranking_model)
+            except RerankingError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            candidates = stages["reranked"]
+            timings["reranking"] = (perf_counter() - rerank_start) * 1000
         trace_id = str(uuid4())
         trace = {"trace_id": trace_id, "question": request.question, "query": request.question,
                 "mode": request.mode, "filters": request.filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
-                "models": {"embedding": embedding_model.config} if request.mode != "keyword" else {},
-                "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)"},
+                "models": {**({"embedding": embedding_model.config} if request.mode != "keyword" else {}), **({"reranker":reranking_model.config} if request.mode == "hybrid_rerank" else {})},
+                "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
                 "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},

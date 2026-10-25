@@ -27,7 +27,7 @@
  let mode = 'keyword';
  let ready = false;
  onMount(() => { ready = true; });
- let settings = {keyword_candidates:20, vector_candidates:20, rrf_constant:60, evidence_limit:8};
+ let settings = {keyword_candidates:20, vector_candidates:20, rrf_constant:60, evidence_limit:8, rerank_candidates:40};
  async function search(event: SubmitEvent) {
   event.preventDefault(); busy = true; error = '';
   const submittedQuestion = question;
@@ -58,12 +58,13 @@
    <textarea id="question" bind:value={question} placeholder="Try Lightning Bolt or Delver…" required maxlength="10000" rows="4"></textarea>
    <FilterControls bind:filters disabled={busy || !ready}/>
    <label class="answer-toggle"><input type="checkbox" bind:checked={includeExplanation} /> Include a cited explanation</label>
-   <div class="form-foot"><div><label for="mode">Search mode</label><select id="mode" bind:value={mode} disabled={busy || !ready}><option value="keyword">Keyword · BM25</option><option value="vector">Vector · local embeddings</option><option value="hybrid">Hybrid · rank fusion</option></select></div><button disabled={busy || !ready || !question.trim()}>{busy ? 'Searching…' : 'Search cards'} <span aria-hidden="true">↗</span></button></div>
+   <div class="form-foot"><div><label for="mode">Search mode</label><select id="mode" bind:value={mode} disabled={busy || !ready}><option value="keyword">Keyword · BM25</option><option value="vector">Vector · local embeddings</option><option value="hybrid">Hybrid · rank fusion</option><option value="hybrid_rerank">Hybrid + cross-encoder</option></select></div><button disabled={busy || !ready || !question.trim()}>{busy ? 'Searching…' : 'Search cards'} <span aria-hidden="true">↗</span></button></div>
    <details class="settings"><summary>Retrieval settings</summary><div class="settings-grid">
     <label>Keyword candidates<input type="number" min="1" max="1000" required bind:value={settings.keyword_candidates}/></label>
     <label>Vector candidates<input type="number" min="1" max="1000" required bind:value={settings.vector_candidates}/></label>
     <label>Fusion constant<input type="number" min="0" max="10000" required bind:value={settings.rrf_constant}/></label>
     <label>Evidence limit<input type="number" min="1" max="1000" required bind:value={settings.evidence_limit}/></label>
+    <label>Reranker shortlist<input type="number" min="1" max="1000" required bind:value={settings.rerank_candidates}/></label>
    </div></details>
   </form>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -82,11 +83,12 @@
   {#if trace}
    <dl><dt>Actual search query</dt><dd data-testid="actual-query">{trace.query}</dd><dt>Mode</dt><dd>{trace.mode}</dd><dt>Active corpus</dt><dd>{trace.corpus?.id || 'No active corpus'}</dd><dt>Search filters</dt><dd data-testid="trace-filters">{describeFilters(trace.filters)}</dd><dt>Retrieval time</dt><dd>{trace.timings_ms.retrieval.toFixed(2)} ms</dd></dl>
    {#each Object.entries(trace.stages) as [stage, cards]}
-    <h3 class="stage-title">{stage === 'fused' ? 'Fused' : stage === 'vector' ? 'Vector' : 'Keyword'} candidates <span>{cards.length}</span></h3><p class="score-note">{stage === 'fused' ? trace.settings.fusion_metric : stage === 'vector' ? trace.settings.vector_metric : 'BM25 · lower scores rank first'}</p>
-    <ol>{#each cards as card}<li><div><a href={`#card-${card.card_id}`}>{card.rank}. {card.name}</a>{#if card.signals}<p class="signals">{#each Object.entries(card.signals) as [branch,signal]}<span>{branch} #{signal.rank} · {signal.score.toPrecision(4)}</span>{/each}</p>{/if}</div><code>{card.score.toPrecision(4)}</code></li>{/each}</ol>
+    <h3 class="stage-title">{stage === 'reranked' ? 'Reranked' : stage === 'fused' ? 'Fused' : stage === 'vector' ? 'Vector' : 'Keyword'} candidates <span>{cards.length}</span></h3><p class="score-note">{stage === 'reranked' ? trace.settings.reranker_metric : stage === 'fused' ? trace.settings.fusion_metric : stage === 'vector' ? trace.settings.vector_metric : 'BM25 · lower scores rank first'}</p>
+    <ol>{#each cards as card}<li><div><a href={`#card-${card.card_id}`}>{card.rank}. {card.name}</a>{#if card.fused_rank !== undefined}<p class="signals">Fused #{card.fused_rank} → #{card.rank} · {card.rank_change! > 0 ? `promoted ${card.rank_change}` : card.rank_change! < 0 ? `demoted ${-card.rank_change!}` : 'unchanged'}</p>{/if}{#if card.signals}<p class="signals">{#each Object.entries(card.signals) as [branch,signal]}<span>{branch} #{signal.rank} · {signal.score.toPrecision(4)}</span>{/each}</p>{/if}</div><code>{card.score.toPrecision(4)}</code></li>{/each}</ol>
    {/each}
    <dl><dt>Stage timings</dt><dd>{#each Object.entries(trace.timings_ms) as [stage,ms]}<div>{stage}: {ms.toFixed(2)} ms</div>{/each}</dd><dt>Effective settings</dt><dd><pre>{JSON.stringify(trace.settings,null,2)}</pre></dd></dl>
    {#if trace.models.embedding}<dl><dt>Embedding model</dt><dd>{(trace.models.embedding as {model:string}).model}</dd><dt>Encoding configuration</dt><dd><pre>{JSON.stringify(trace.models.embedding,null,2)}</pre></dd></dl>{/if}
+   {#if trace.models.reranker}<dl><dt>Reranker model</dt><dd>{(trace.models.reranker as {model:string}).model}</dd><dt>Reranker configuration</dt><dd><pre>{JSON.stringify(trace.models.reranker,null,2)}</pre></dd></dl>{/if}
    <details><summary>Complete trace</summary><pre>{JSON.stringify(trace,null,2)}</pre></details>
   {:else}<div class="inspector-empty">Submit a question to inspect its retrieval trail.</div>{/if}
  </aside>
