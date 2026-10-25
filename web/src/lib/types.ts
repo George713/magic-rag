@@ -6,6 +6,7 @@ export interface Card {
  fused_rank?: number; fusion_score?: number; rank_change?: number;
 }
 export interface Trace {
+ answer_context?: {retrieval_query: string; conversation_context: {question: string; query: string; answer?: string}[]; context_truncated: boolean};
  conversation_id?: string; turn_id?: string;
  trace_id: string; question: string; query: string; mode: string;
  filters: ExactFilters; corpus: {id: string; metadata: string} | null;

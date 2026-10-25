@@ -10,7 +10,7 @@ from magic_rag.ingest import ingest_sample
 
 
 class BrowserProvider:
-    async def stream_answer(self, question, evidence, session_id):
+    async def stream_answer(self, question, evidence, session_id, *, context=None):
         yield {"delta": "The transformed "}
         if "stop" in question:
             await asyncio.sleep(15)

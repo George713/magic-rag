@@ -17,6 +17,8 @@ uv run --extra models --python 3.11 python -m magic_rag import --source C:/path/
 
 Local files receive a SHA-256 corpus identity and source filename, without inventing an export date. Live downloads additionally record the discovered bulk ID, update timestamp, URI, and checksum. `GET /api/corpus` reports active identity and metadata; `POST /api/corpus/import` explicitly runs a live refresh through the same application service. The interface shows the corpus identity on each retrieval trace. A sample command deliberately replaces the active corpus with the small controlled sample; use a separate `MAGIC_RAG_DB` for experiments if preserving a complete import.
 
+The application enables SQLite WAL mode and holds one read transaction across corpus identity, embedding compatibility, and all candidate branches. An in-flight search therefore retains one corpus snapshot even if a refresh activates during query embedding; later searches see the replacement. Stop the process or use SQLite's backup API when copying a database, since committed pages can reside in its WAL sidecar.
+
 ## Verified export contract
 
 Checked against the [official bulk documentation](https://scryfall.com/docs/api/bulk-data), [live bulk metadata](https://api.scryfall.com/bulk-data), and [card schema](https://scryfall.com/docs/api/cards) on 2026-10-25:

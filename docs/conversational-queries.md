@@ -4,6 +4,8 @@ With a configured, workload-approved provider, follow-up searches make a separat
 
 Rewriting uses the last six turns of the current conversation: original questions, previous actual queries, and completed answers when present. Failed/cancelled partial answers are omitted. This is conversational context, not verified card evidence. Retrieved card texts are supplied separately to answer generation; they are not copied into the rewrite request. Conversations never share history with one another.
 
+Answer generation also receives the actual query and a bounded frozen copy of earlier conversational context, separately from the selected card evidence. That snapshot is saved with retrieval and reused for both synchronous and streamed answers, so future turns cannot change an earlier answer's context. See [answer-context limits](providers.md).
+
 The first turn has no earlier context and is searched as submitted. When rewriting is available its status is `not_needed`. A successful follow-up records `rewritten`. If the provider is absent, its suitability is unconfirmed, its request fails, or its response is malformed, the status is `unavailable` and the submitted text is searched **exactly as-is** under the current explicit filters. The interface explains the fallback and recommends a self-contained question. It never claims an unavailable rewrite resolved a contextual reference.
 
 The inspector and saved trace retain `question`, actual `query`, `rewrite.status`, `rewrite.message`, and measured `rewrite.elapsed_ms` (also in `timings_ms.rewrite`). The retrieval total includes rewriting; individual keyword/vector/fusion/reranking timings remain separate. Reopening a turn displays its original saved provenance without rewriting or searching again.

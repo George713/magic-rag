@@ -51,7 +51,7 @@ class TopicProvider:
         assert "selected_evidence" not in history[-1]
         return {"query": STANDALONE}
 
-    def answer(self, question, evidence, session_id):
+    def answer(self, question, evidence, session_id, *, context=None):
         assert question == FOLLOWUP
         return {"text": "Atog sacrifices artifacts.", "citations": [ATOG], "insufficient_evidence": False}
 
@@ -202,7 +202,7 @@ def test_rewrite_context_includes_completed_answers_but_omits_failed_partial_out
                 assert all("selected_evidence" not in item for item in history)
             return {"query": STANDALONE if question == FOLLOWUP else question}
 
-        async def stream_answer(self, question, evidence, session_id):
+        async def stream_answer(self, question, evidence, session_id, *, context=None):
             if question == INITIAL:
                 yield {"delta": "Unfinished unverified thought"}
                 raise RuntimeError("Controlled failed stream")

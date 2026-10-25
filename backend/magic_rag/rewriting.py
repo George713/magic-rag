@@ -6,6 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .providers import provider_status
 
+CONTEXT_TURN_LIMIT = 6
+ANSWER_CONTEXT_CHARACTER_BUDGET = 16000
+ANSWER_CONTEXT_FIELD_LIMIT = 4000
+
 
 class RewritePayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -14,12 +18,30 @@ class RewritePayload(BaseModel):
 
 def conversation_context(turns):
     context = []
-    for turn in turns[-6:]:
+    for turn in turns[-CONTEXT_TURN_LIMIT:]:
         item = {"question": turn["question"], "query": turn["trace"]["query"]}
         if turn["state"] == "completed" and turn.get("answer"):
             item["answer"] = turn["answer"]
         context.append(item)
     return context
+
+
+def freeze_answer_context(query, turns):
+    history = []
+    remaining = ANSWER_CONTEXT_CHARACTER_BUDGET
+    truncated = len(turns) > CONTEXT_TURN_LIMIT
+    for item in reversed(conversation_context(turns)):
+        clipped = {}
+        for key, value in item.items():
+            clipped[key] = value if len(value) <= ANSWER_CONTEXT_FIELD_LIMIT else value[:ANSWER_CONTEXT_FIELD_LIMIT-1] + "…"
+            truncated = truncated or len(value) > ANSWER_CONTEXT_FIELD_LIMIT
+        size = sum(len(value) for value in clipped.values())
+        if size > remaining:
+            truncated = True
+            break
+        history.append(clipped)
+        remaining -= size
+    return {"retrieval_query":query, "conversation_context":list(reversed(history)), "context_truncated":truncated}
 
 
 async def rewrite_query(provider, question, history, session_id):

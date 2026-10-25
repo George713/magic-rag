@@ -59,7 +59,7 @@ def test_saved_hybrid_turn_and_provider_share_the_same_limited_evidence(tmp_path
     model = ControlledEmbedder()
     ingest_sample(path, embedder=model)
     class EvidenceProvider:
-        def answer(self, question, evidence, session_id):
+        def answer(self, question, evidence, session_id, *, context=None):
             assert len(evidence) == 1
             assert evidence[0]["card_id"] == "sample-sol-ring"
             return {"text":"This card produces mana.", "citations":["sample-sol-ring"], "insufficient_evidence":False}

@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 import httpx
 import pytest
-from shutil import copyfile
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -14,7 +14,7 @@ from magic_rag.providers import ChatCompletionsProvider, ProviderConfig
 
 
 class StreamingProvider:
-    async def stream_answer(self, question, evidence, session_id):
+    async def stream_answer(self, question, evidence, session_id, *, context=None):
         yield {"delta": "The transformed "}
         await asyncio.sleep(0)
         yield {"delta": "face has flying."}
@@ -48,7 +48,7 @@ def test_streamed_answer_keeps_evidence_and_completed_state_after_restart(tmp_pa
 
 def test_failed_stream_preserves_partial_text_and_is_not_completed(tmp_path):
     class FailingProvider:
-        async def stream_answer(self, *args):
+        async def stream_answer(self, *args, context=None):
             yield {"delta": "Partial explanation"}
             raise RuntimeError("private-provider-key")
 
@@ -72,7 +72,7 @@ def test_stop_cancels_waiting_provider_and_preserves_partial_state(tmp_path):
     closed = Event()
 
     class WaitingProvider:
-        async def stream_answer(self, *args):
+        async def stream_answer(self, *args, context=None):
             try:
                 yield {"delta": "An unfinished "}
                 started.set()
@@ -130,7 +130,7 @@ def test_actual_http_adapter_streams_text_before_validating_final_citations(tmp_
 @pytest.mark.parametrize("failure", ["unknown_citation", "uncited", "eof"])
 def test_incomplete_or_unsupported_stream_never_becomes_completed(tmp_path, failure):
     class InvalidProvider:
-        async def stream_answer(self, *args):
+        async def stream_answer(self, *args, context=None):
             yield {"delta": "Partial statement"}
             if failure != "eof":
                 yield {"result": {"text": "Partial statement", "citations": ["invented"] if failure == "unknown_citation" else [], "insufficient_evidence": False}}
@@ -150,7 +150,7 @@ def test_disconnected_browser_cancels_upstream_and_saves_partial_answer(tmp_path
     closed = Event()
 
     class DisconnectProvider:
-        async def stream_answer(self, *args):
+        async def stream_answer(self, *args, context=None):
             try:
                 yield {"delta": "Partial before disconnect"}
                 await asyncio.sleep(5)
@@ -209,7 +209,7 @@ def test_restart_recovers_interrupted_generating_turn_as_incomplete(tmp_path):
     waiting = Event()
 
     class InterruptedProvider:
-        async def stream_answer(self, *args):
+        async def stream_answer(self, *args, context=None):
             yield {"delta": "Saved before shutdown"}
             waiting.set()
             await asyncio.sleep(2)
@@ -223,8 +223,9 @@ def test_restart_recovers_interrupted_generating_turn_as_incomplete(tmp_path):
         with ThreadPoolExecutor() as pool:
             result = pool.submit(client.post, base + "/stream")
             assert waiting.wait(5)
-            # Copy a committed application snapshot while its remote stream is waiting.
-            copyfile(path, snapshot)
+            # Include committed WAL pages in the simulated shutdown image.
+            with sqlite3.connect(path) as original, sqlite3.connect(snapshot) as restart_image:
+                original.backup(restart_image)
             client.post(base + "/cancel")
             result.result(timeout=5)
     with TestClient(create_app(snapshot)) as restarted:

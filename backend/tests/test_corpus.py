@@ -17,6 +17,36 @@ class FixtureSource:
         return {"id":"snapshot-one", "source":"controlled export"}, [card, {**card,"id":"printing-two"}]
 
 
+def test_refresh_during_hybrid_search_keeps_both_branches_on_one_corpus_snapshot(tmp_path):
+    class RefreshingEmbedder(ControlledEmbedder):
+        refresh = None
+
+        def query(self, text):
+            if self.refresh:
+                refresh, self.refresh = self.refresh, None
+                refresh()
+            return super().query(text)
+
+    source = FixtureSource()
+    model = RefreshingEmbedder()
+    with TestClient(create_app(tmp_path / "cards.db", embedder=model, corpus_source=source)) as client:
+        assert client.post("/api/corpus/import").status_code == 200
+        metadata, records = source.snapshot()
+        source.snapshot = lambda: ({**metadata, "id":"snapshot-two"}, [{**records[0], "oracle_id":"canonical-two", "name":"Replacement Source"}])
+
+        def activate_during_query():
+            assert client.post("/api/corpus/import").status_code == 200
+
+        model.refresh = activate_during_query
+        before = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid"}).json()
+        assert before["corpus"]["id"] == "snapshot-one"
+        assert {card["card_id"] for branch in ("keyword", "vector") for card in before["stages"][branch]} == {"canonical-one"}
+        assert client.get("/api/corpus").json()["id"] == "snapshot-two"
+        after = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid"}).json()
+        assert after["corpus"]["id"] == "snapshot-two"
+        assert {card["card_id"] for branch in ("keyword", "vector") for card in after["stages"][branch]} == {"canonical-two"}
+
+
 def test_import_collapses_printings_retains_all_faces_and_canonical_fields(tmp_path):
     with TestClient(create_app(tmp_path / "cards.db", embedder=ControlledEmbedder(), corpus_source=FixtureSource())) as client:
         response = client.post("/api/corpus/import")
