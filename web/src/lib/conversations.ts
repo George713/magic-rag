@@ -1,4 +1,5 @@
 import type { Trace } from './types';
+import type { ExactFilters } from './filters';
 
 export interface SavedTurn {
  id: string; conversation_id: string; question: string; state: string;
@@ -7,4 +8,4 @@ export interface SavedTurn {
 export interface ConversationSummary {
  id: string; title: string; created_at: string; updated_at: string;
 }
-export interface Conversation extends ConversationSummary { turns: SavedTurn[] }
+export interface Conversation extends ConversationSummary { turns: SavedTurn[]; current_filters?: ExactFilters }

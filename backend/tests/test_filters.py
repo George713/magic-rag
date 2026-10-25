@@ -97,3 +97,50 @@ def test_clearing_filters_returns_candidates_and_keeps_saved_trace_constraints(t
 def test_invalid_filters_are_rejected_explicitly(tmp_path, filters):
     with TestClient(create_app(tmp_path / "cards.db")) as client:
         assert client.post("/api/search", json={"question": "fixture", "filters": filters}).status_code == 422
+
+
+@pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid", "hybrid_rerank"])
+def test_legendary_eligibility_precedes_limits_and_exact_names_and_can_be_cleared(tmp_path, mode):
+    import json
+    from magic_rag.app import connect
+    from magic_rag.vectors import store_vectors
+    path = tmp_path / "legendary.db"
+    fixtures = [
+        ("ordinary", "fixture", "Creature — Human", ["U", "R"]),
+        ("legend", "Legend fixture", "Legendary Artifact Creature — Construct", ["U", "R"]),
+        ("text", "Text fixture", "Creature — Human", ["U", "R"]),
+        ("subtype", "Subtype fixture", "Creature — Legendary", ["U", "R"]),
+        ("mono", "Mono fixture", "Legendary Creature — Human", ["U"]),
+        ("faces", "Faces fixture", "Instant // Legendary Creature — Human", ["W"]),
+    ]
+    model = ControlledEmbedder()
+    with connect(path) as db:
+        for card_id, name, type_line, colors in fixtures:
+            db.execute("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?)", (card_id, name, "Legendary fixture ability", "", 2, json.dumps(colors), type_line))
+            db.execute("INSERT INTO card_fts VALUES (?, ?)", (card_id, name + " Legendary fixture ability"))
+        db.execute("INSERT INTO corpus VALUES ('fixture', '{}')")
+        store_vectors(db, [(row[0], row[1]) for row in fixtures], model)
+    with TestClient(create_app(path, embedder=model, reranker=FilterReranker())) as client:
+        conversation = client.post('/api/conversations').json()['id']
+        filters = {"legendary": True, "card_types": ["Artifact", "Creature"], "colors": ["U", "R"], "mana_value_min": 2, "mana_value_max": 2}
+        response = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": filters, "conversation_id": conversation, "settings": {"keyword_candidates": 1, "vector_candidates": 1}})
+        assert response.status_code == 200
+        trace = response.json()
+        for candidates in [*trace['stages'].values(), trace['selected_evidence']]:
+            assert [card['card_id'] for card in candidates] == ['legend']
+        saved = client.get(f'/api/conversations/{conversation}').json()
+        assert saved['turns'][0]['trace']['filters']['legendary'] is True
+        all_legends = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": {"legendary": True, "card_types": ["Creature"]}}).json()
+        assert {card['card_id'] for card in all_legends['selected_evidence']} == {'legend', 'mono', 'faces'}
+        cleared = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": {"legendary": False, "colors": ["U", "R"]}}).json()
+        assert {card['card_id'] for card in cleared['selected_evidence']} == {'ordinary', 'legend', 'text', 'subtype'}
+
+
+@pytest.mark.parametrize('filters', [{"legendary": "true"}, {"legendary": 1}, {"legendary": None}])
+def test_invalid_legendary_filter_updates_do_not_replace_current_controls(tmp_path, filters):
+    path = tmp_path / 'cards.db'
+    with TestClient(create_app(path)) as client:
+        conversation = client.post('/api/conversations').json()['id']
+        assert client.patch(f'/api/conversations/{conversation}', json={"filters": {"legendary": True}}).status_code == 200
+        assert client.patch(f'/api/conversations/{conversation}', json={"filters": filters}).status_code == 422
+        assert client.get(f'/api/conversations/{conversation}').json()['current_filters'] == {"legendary": True}
