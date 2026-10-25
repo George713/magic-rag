@@ -50,3 +50,5 @@ For the fourth mode and before/after cross-encoder rankings, see [reranking.md](
 See [saved conversations](conversations.md) for local history, reopening original evidence, deletion, and the optional search `conversation_id`.
 
 See [exact card filters](filters.md) for color/type matching, inclusive mana-value ranges, retained controls, and candidate eligibility across retrieval modes.
+
+See [conversational queries](conversational-queries.md) for follow-up rewriting, original/actual query provenance, retained explicit filters, and transparent provider fallback.
