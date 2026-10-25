@@ -8,7 +8,7 @@ import anyio
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from .providers import AnswerPayload, generate_answer, provider_status
+from .providers import completed_answer, generate_answer, provider_status
 
 
 class StreamStopped(Exception):
@@ -65,15 +65,16 @@ def register_streaming(app, store, provider):
         async def events():
             nonlocal generation
             evidence = turn["trace"]["selected_evidence"]
+            context = turn["trace"].get("answer_context", {"retrieval_query":turn["trace"]["query"],"conversation_context":[]})
             iterator = None
             try:
                 yield encode_event("start", generation=generation)
                 if provider_status(provider)["status"] != "ready" or not evidence:
-                    generation = generate_answer(provider, turn["question"], evidence, conversation_id)
+                    generation = generate_answer(provider, turn["question"], evidence, conversation_id, context=context)
                     store.update_generation(conversation_id, turn_id, generation, expected_states={"generating"})
                     yield encode_event("done", generation=generation)
                     return
-                iterator = provider.stream_answer(turn["question"], evidence, conversation_id).__aiter__()
+                iterator = provider.stream_answer(turn["question"], evidence, conversation_id, context=context).__aiter__()
                 while True:
                     try:
                         event = await next_until_stopped(iterator, stopped)
@@ -85,13 +86,7 @@ def register_streaming(app, store, provider):
                             raise StreamStopped()
                         yield encode_event("delta", text=event["delta"])
                     elif "result" in event:
-                        result = AnswerPayload.model_validate(event["result"])
-                        cards = {card["card_id"]: card for card in evidence}
-                        if result.text != generation["text"] or (not result.insufficient_evidence and not result.citations):
-                            raise ValueError("Incomplete or uncited answer")
-                        generation = {"status": "completed", "message": "Answer grounded in selected card evidence.",
-                                      "text": result.text, "insufficient_evidence": result.insufficient_evidence,
-                                      "citations": [{"card_id": card_id, "name": cards[card_id]["name"]} for card_id in dict.fromkeys(result.citations)]}
+                        generation = completed_answer(event["result"],evidence,streamed_text=generation["text"])
                         if not store.update_generation(conversation_id, turn_id, generation, expected_states={"generating"}):
                             raise StreamStopped()
                         yield encode_event("done", generation=generation)

@@ -53,3 +53,34 @@ test('provider failure keeps partial output, source cards, and subsequent turns 
  await page.getByRole('button',{name:'Search cards'}).click();
  await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
 });
+
+test('Stop aborts upstream even when cancel HTTP stalls and cannot overwrite a later turn', async ({page,request}) => {
+ let release!: () => void;
+ const held = new Promise<void>(resolve => {release=resolve;});
+ let cancelRequested = false;
+ await page.route('**/api/conversations/*/turns/*/cancel', async route => {
+  cancelRequested = true;
+  await held;
+  await route.abort().catch(() => {});
+ });
+ try {
+  await ask(page,'Delver stop');
+  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
+  const boundedCancel = page.waitForEvent('requestfailed',{predicate:request => request.url().endsWith('/cancel')});
+  await page.getByRole('button',{name:'Stop answer'}).click();
+  await expect(page.getByRole('button',{name:'Search cards'})).toBeEnabled();
+  await expect.poll(async () => {
+   const conversations = await (await request.get('/api/conversations')).json();
+   const detail = await (await request.get(`/api/conversations/${conversations[0].id}`)).json();
+   return detail.turns[0].state;
+  },{timeout:2000}).toBe('cancelled');
+  expect(cancelRequested).toBe(true);
+  await page.getByLabel('Include a cited explanation').uncheck();
+  await page.getByLabel('Your question').fill('Lightning Bolt');
+  await page.getByRole('button',{name:'Search cards'}).click();
+  await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
+  await boundedCancel;
+  await expect(page.getByRole('alert')).not.toBeVisible();
+  await expect(page.getByTestId('actual-query')).toHaveText('Lightning Bolt');
+ } finally {release();}
+});

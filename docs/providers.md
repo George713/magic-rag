@@ -4,6 +4,8 @@ Answer generation is optional. Select **Include a cited explanation** to generat
 
 The browser now uses [streamed saved-turn answers and Stop](streaming.md). The synchronous search option described below remains available to API clients.
 
+Answers receive the original user question, actual retrieval query, and a frozen conversational-context snapshot separately from selected card evidence. The snapshot contains at most six earlier turns from that conversation, completed answers only, a 16,000-character history budget, and a 4,000-character limit per older text field. Any clipping or omitted older context is recorded as `answer_context.context_truncated`; the original submitted question, actual query, and card evidence remain complete. Failed/cancelled partial answers and turns added after retrieval are excluded. Both synchronous and streamed generation use the same saved snapshot.
+
 ## Provider prerequisite
 
 Checked 2026-10-25: [OpenCode Go's workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) requests typical coding-agent traffic. Magic card Q&A suitability is unresolved. The [inference API](https://opencode.ai/v2/docs/console/api/inference/) documents compatible HTTP interfaces, but this does not establish workload suitability. No Go generation request was sent, no paid alternative was selected, and no live-provider smoke test was run. Confirm suitability with the provider before enabling requests.

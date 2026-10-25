@@ -2,12 +2,12 @@
 
 Select **Include a cited explanation** and submit a question. Retrieval is saved first; its complete evidence stays visible while the answer streams. **Stop answer** ends generation promptly and retains the partial text with an explicit cancelled state. Partial or failed output has no validated citations and is never labelled completed. Reopening a conversation shows the saved state and original evidence.
 
-The application supports one Python process per database. At startup, any `generating` turn left by an interrupted process becomes `cancelled`; committed partial text remains available. Remote cancellation is best effort and cannot guarantee the provider stops billing immediately.
+The application supports one Python process per database. At startup, any `generating` turn left by an interrupted process becomes `cancelled`; committed partial text remains available. Stop aborts the active stream immediately and independently sends a cancellation request with a three-second timeout; a stalled cancellation endpoint cannot keep the provider stream open or overwrite a subsequent turn's status. Remote cancellation is best effort and cannot guarantee the provider stops billing immediately.
 
 ## Service contract
 
 1. `POST /api/search` with a `conversation_id` saves the retrieved turn and returns `turn_id`. The UI uses `generate_answer: false` so retrieval is available before any remote answer starts. The synchronous option remains available for API clients.
-2. `POST /api/conversations/{conversation_id}/turns/{turn_id}/stream` starts an answer using that saved turn's exact question and selected evidence. The response is `application/x-ndjson`, one JSON event per line:
+2. `POST /api/conversations/{conversation_id}/turns/{turn_id}/stream` starts an answer using that saved turn's exact question, actual retrieval query, frozen bounded conversational context, and selected evidence. The response is `application/x-ndjson`, one JSON event per line:
 
    ```json
    {"event":"start","generation":{"status":"generating","message":"Generating from selected evidence.","text":"","citations":[]}}

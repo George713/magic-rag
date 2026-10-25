@@ -62,18 +62,22 @@
  async function stopAnswer() {
   const active = trace; const activeController = controller;
   if (!active || !activeController) return;
-  ++operation; busy=false; generating=false; controller=null;
+  const stopOperation = ++operation;
+  busy=false; generating=false; controller=null;
   trace={...active,generation:{...active.generation,status:'cancelled',message:'Answer stopped. Partial output is incomplete.',citations:[]}};
+  activeController.abort();
+  const isCurrent = () => operation === stopOperation && trace?.turn_id === active.turn_id;
   try {
-   const response = await fetch(answerPath(active,'cancel'),{method:'POST'});
+   const response = await fetch(answerPath(active,'cancel'),{method:'POST',signal:AbortSignal.timeout(3000)});
    if (!response.ok) throw new Error('Stop could not reach the service. The connection has been closed; partial output is incomplete.');
    const generation = await response.json();
-   if (trace?.turn_id === active.turn_id) trace={...trace,generation};
-  } catch(e) {error = e instanceof Error ? e.message : 'Stop connection failed.';}
+   if (isCurrent()) trace={...active,generation:generation.status === 'cancelled' ? {...generation,message:'Answer stopped. Partial output is incomplete.'} : generation};
+  } catch {
+   if (isCurrent()) error='Stop could not reach the service within three seconds. The stream connection was closed; partial output is incomplete.';
+  }
   finally {
-   activeController.abort();
-   if (trace?.turn_id === active.turn_id) {
-    try {await history.saved(trace!);} catch {error='The saved turn could not be refreshed. Reopen the conversation when the service is available.';}
+   if (isCurrent()) {
+    try {await history.saved(trace!);} catch {if (isCurrent()) error='The saved turn could not be refreshed. Reopen the conversation when the service is available.';}
    }
   }
  }

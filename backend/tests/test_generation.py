@@ -22,7 +22,7 @@ def test_unconfigured_generation_preserves_retrieved_card_evidence(tmp_path):
 
 def test_cited_answer_receives_complete_selected_card_text(tmp_path):
     class EvidenceProvider:
-        def answer(self, question, evidence, session_id):
+        def answer(self, question, evidence, session_id, *, context=None):
             card = evidence[0]
             assert question == "Delver"
             assert "Flying" in card["text"]
@@ -47,7 +47,7 @@ def test_cited_answer_receives_complete_selected_card_text(tmp_path):
 ])
 def test_invalid_provider_evidence_is_failed_without_losing_retrieval(tmp_path, result):
     class InvalidProvider:
-        def answer(self, question, evidence, session_id):
+        def answer(self, question, evidence, session_id, *, context=None):
             return result
 
     path = tmp_path / "cards.db"
@@ -61,7 +61,7 @@ def test_invalid_provider_evidence_is_failed_without_losing_retrieval(tmp_path, 
 
 def test_no_evidence_is_explicit_without_contacting_provider(tmp_path):
     class UnneededProvider:
-        def answer(self, *args):
+        def answer(self, *args, context=None):
             raise AssertionError("An empty evidence set must not be sent for generation")
 
     with TestClient(create_app(tmp_path / "empty.db", provider=UnneededProvider())) as client:
@@ -74,7 +74,7 @@ def test_no_evidence_is_explicit_without_contacting_provider(tmp_path):
 
 def test_provider_failure_never_exposes_credentials_and_search_can_continue(tmp_path):
     class FailedProvider:
-        def answer(self, *args):
+        def answer(self, *args, context=None):
             raise RuntimeError("secret-api-key-and-private-endpoint")
 
     path = tmp_path / "cards.db"

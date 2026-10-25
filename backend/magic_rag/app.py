@@ -18,7 +18,7 @@ from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 from .evaluation import register_evaluation
-from .rewriting import conversation_context, rewrite_query
+from .rewriting import conversation_context, freeze_answer_context, rewrite_query
 
 
 def default_db_path() -> Path:
@@ -70,8 +70,9 @@ class SearchRequest(BaseModel):
 def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None, corpus_source=None) -> FastAPI:
     provider = provider if provider is not None else provider_from_env()
     path = Path(db_path or default_db_path())
-    with connect(path):
-        pass
+    with connect(path) as db:
+        # A refresh can commit while an in-flight search retains its read snapshot.
+        db.execute("PRAGMA journal_mode=WAL")
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
     register_streaming(app, conversations, provider)
@@ -108,12 +109,14 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         trace_id = str(uuid4())
         query, rewrite = from_thread.run(rewrite_query, provider, request.question,
                                         conversation_context(turns), request.conversation_id or trace_id)
+        answer_context = freeze_answer_context(query, turns)
         tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
         expression = " OR ".join('"' + token + '"' for token in tokens)
         eligibility, filter_parameters = filters.sql()
         stages = {}
         timings = {}
         with connect(path) as db:
+            db.execute("BEGIN")
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
             branches = ("keyword", "vector") if request.mode in ("hybrid", "hybrid_rerank") else (request.mode,)
             for branch in branches:
@@ -151,7 +154,8 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
                 "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": rewrite,
-                "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id) if request.generate_answer else provider_status(provider)}
+                "answer_context":answer_context,
+                "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
             conversations.append_trace(request.conversation_id, trace)
         return trace

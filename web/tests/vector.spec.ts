@@ -7,5 +7,5 @@ test('vector mode presents model identity, distance convention, candidates and t
  await expect(page.getByRole('heading', {name:'Sol Ring', exact:true})).toBeVisible();
  await expect(page.getByText('cosine distance (lower is better)', {exact:true})).toBeVisible();
  await expect(page.getByText('controlled', {exact:true})).toBeVisible();
- await expect(page.getByText('Vector candidates', {exact:false}).first()).toBeVisible();
+ await expect(page.getByRole('heading', {name:'Vector candidates', exact:false})).toBeVisible();
 });

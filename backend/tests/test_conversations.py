@@ -68,7 +68,7 @@ def test_cited_answer_is_saved_with_original_evidence_and_stable_conversation_se
     sessions = []
 
     class Provider:
-        def answer(self, question, evidence, session_id):
+        def answer(self, question, evidence, session_id, *, context=None):
             sessions.append(session_id)
             return {"text": "The back face has flying.", "citations": ["sample-delver"], "insufficient_evidence": False}
 
