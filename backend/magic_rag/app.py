@@ -17,6 +17,7 @@ from .conversations import register_conversations
 from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
+from .evaluation import register_evaluation
 from .rewriting import conversation_context, rewrite_query
 
 
@@ -155,4 +156,5 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
             conversations.append_trace(request.conversation_id, trace)
         return trace
 
+    register_evaluation(app, search, SearchRequest)
     return app

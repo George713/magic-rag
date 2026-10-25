@@ -1,0 +1,413 @@
+{
+  "version": "cards-v1-2026-10-25",
+  "review": "Agent-reviewed against complete canonical card text/all faces from the stated Oracle snapshot; independently reviewed again during implementation. Bounded positives are not exhaustive corpus relevance. No remote generated answers supplied labels. See docs/evaluation.md.",
+  "source": {
+    "metadata_uri": "https://api.scryfall.com/bulk-data/oracle_cards",
+    "updated_at": "2026-10-25T09:01:57.491+00:00",
+    "sha256": "a1f17b0755da5cba940c9b1df71e758415e225ea9d97b9bf1bc699fedc3cfcc3"
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "category": "exact_name",
+      "question": "Lightning Bolt",
+      "qrels": [
+        {
+          "card_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+          "name": "Lightning Bolt",
+          "relevance": 1,
+          "rationale": "Exact canonical card name; deals 3 damage to any target."
+        }
+      ],
+      "unsupported": false,
+      "review": "Exact-name lookup uniquely matched one Oracle ID.",
+      "filters": {}
+    },
+    {
+      "id": "q02",
+      "category": "exact_name",
+      "question": "Counterspell",
+      "qrels": [
+        {
+          "card_id": "cc187110-1148-4090-bbb8-e205694a39f5",
+          "name": "Counterspell",
+          "relevance": 1,
+          "rationale": "Exact canonical card name; counter target spell."
+        }
+      ],
+      "unsupported": false,
+      "review": "Exact-name lookup uniquely matched one Oracle ID.",
+      "filters": {}
+    },
+    {
+      "id": "q03",
+      "category": "exact_name",
+      "question": "Sol Ring",
+      "qrels": [
+        {
+          "card_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+          "name": "Sol Ring",
+          "relevance": 1,
+          "rationale": "Exact canonical card name; tapping adds two colorless mana."
+        }
+      ],
+      "unsupported": false,
+      "review": "Exact-name lookup uniquely matched one Oracle ID.",
+      "filters": {}
+    },
+    {
+      "id": "q04",
+      "category": "multi_face",
+      "question": "Delver of Secrets transforms into Insectile Aberration",
+      "qrels": [
+        {
+          "card_id": "edd531b9-f615-4399-8c8c-1c5e18c4acbf",
+          "name": "Delver of Secrets // Insectile Aberration",
+          "relevance": 1,
+          "rationale": "Front face reveals instant or sorcery to transform; back face is Insectile Aberration with flying."
+        }
+      ],
+      "unsupported": false,
+      "review": "Reviewed BOTH face texts; one canonical card, not two printing or face results.",
+      "filters": {}
+    },
+    {
+      "id": "q05",
+      "category": "paraphrased_ability",
+      "question": "A flying bird that can tap to make mana of any color",
+      "qrels": [
+        {
+          "card_id": "d3a0b660-358c-41bd-9cd2-41fbf3491b1a",
+          "name": "Birds of Paradise",
+          "relevance": 1,
+          "rationale": "Creature Bird, flying, tap to add one mana of any color."
+        }
+      ],
+      "unsupported": false,
+      "review": "Reviewed complete text and creature subtype; named positive directly satisfies all requested abilities.",
+      "filters": {}
+    },
+    {
+      "id": "q06",
+      "category": "paraphrased_ability",
+      "question": "A creature I can sacrifice to fetch a basic land onto the battlefield tapped",
+      "qrels": [
+        {
+          "card_id": "e3afc704-220f-498f-9eaa-0821b17dc24c",
+          "name": "Sakura-Tribe Elder",
+          "relevance": 1,
+          "rationale": "Self-sacrifice activated ability searches a basic land and puts it onto the battlefield tapped."
+        }
+      ],
+      "unsupported": false,
+      "review": "Self-sacrifice is explicit, rather than merely an enters-the-battlefield land trigger.",
+      "filters": {}
+    },
+    {
+      "id": "q07",
+      "category": "paraphrased_ability",
+      "question": "Get two basic lands from my library, one tapped on the battlefield and one in my hand",
+      "qrels": [
+        {
+          "card_id": "8b755881-a72d-4e21-a369-d2924eb4585a",
+          "name": "Cultivate",
+          "relevance": 1,
+          "rationale": "Search up to two basic lands; one enters tapped and the other goes to hand."
+        },
+        {
+          "card_id": "1593ea18-2f2f-4ab4-83fb-6ccc0bec8a90",
+          "name": "Kodama's Reach",
+          "relevance": 1,
+          "rationale": "Same two-basic-land outcome; Arcane subtype does not change relevance."
+        }
+      ],
+      "unsupported": false,
+      "review": "Reviewed both complete texts; both explicitly satisfy each destination.",
+      "filters": {}
+    },
+    {
+      "id": "q08",
+      "category": "paraphrased_ability",
+      "question": "A creature that destroys an artifact or enchantment when it enters",
+      "qrels": [
+        {
+          "card_id": "032ec6e2-6cc3-4a97-9cc7-3233f5e11904",
+          "name": "Reclamation Sage",
+          "relevance": 1,
+          "rationale": "Enters trigger may destroy target artifact or enchantment."
+        }
+      ],
+      "unsupported": false,
+      "review": "Naturalize was inspected and excluded: instant, not a creature or enters trigger.",
+      "filters": {}
+    },
+    {
+      "id": "q09",
+      "category": "paraphrased_ability",
+      "question": "An artifact creature that finds a basic land when it enters and draws a card when it dies",
+      "qrels": [
+        {
+          "card_id": "00c0543c-2a1f-4425-8283-4062d74a1637",
+          "name": "Solemn Simulacrum",
+          "relevance": 1,
+          "rationale": "Artifact Creature with both the basic-land enters trigger and card-draw death trigger."
+        }
+      ],
+      "unsupported": false,
+      "review": "Both effects belong to one card; no inferred combo or rules ruling.",
+      "filters": {}
+    },
+    {
+      "id": "q10",
+      "category": "paraphrased_ability",
+      "question": "A creature that lets me sacrifice another creature to scry",
+      "qrels": [
+        {
+          "card_id": "f82a4e85-526d-4456-b700-7760043a31be",
+          "name": "Viscera Seer",
+          "relevance": 1,
+          "rationale": "Sacrifice a creature: scry 1, without a mana or tap cost."
+        }
+      ],
+      "unsupported": false,
+      "review": "Carrion Feeder inspected and excluded: sacrifice puts a counter, it does not scry.",
+      "filters": {}
+    },
+    {
+      "id": "q11",
+      "category": "paraphrased_ability",
+      "question": "An instant that sacrifices an artifact or creature to draw two cards and make a Treasure",
+      "qrels": [
+        {
+          "card_id": "457af74a-02b3-4659-846d-63e482667f34",
+          "name": "Deadly Dispute",
+          "relevance": 1,
+          "rationale": "Sacrificing artifact or creature is an additional cost; draw two and create Treasure."
+        }
+      ],
+      "unsupported": false,
+      "review": "Village Rites inspected and excluded: no artifact option or Treasure.",
+      "filters": {}
+    },
+    {
+      "id": "q12",
+      "category": "paraphrased_ability",
+      "question": "A cheap instant that looks at the top card, can put it in the graveyard, then draws a card",
+      "qrels": [
+        {
+          "card_id": "4c9bcba6-87b5-4fb3-97ee-6fe5b739337d",
+          "name": "Consider",
+          "relevance": 1,
+          "rationale": "Surveil 1 followed by draw a card; one mana Instant."
+        }
+      ],
+      "unsupported": false,
+      "review": "Opt inspected and excluded: scry moves to bottom rather than graveyard.",
+      "filters": {}
+    },
+    {
+      "id": "q13",
+      "category": "constraints",
+      "question": "Creatures that sacrifice artifacts for value",
+      "qrels": [
+        {
+          "card_id": "3095f2cf-05c3-4381-929f-c526b6fc30a7",
+          "name": "Atog",
+          "relevance": 1,
+          "rationale": "Sacrifice artifact for temporary +2/+2; red Creature mana value 2."
+        },
+        {
+          "card_id": "c1d6cce8-085f-42cb-8b0c-b6fbbf88b16a",
+          "name": "Goblin Engineer",
+          "relevance": 1,
+          "rationale": "Activated ability sacrifices artifact to return an artifact; red Creature mana value 2."
+        },
+        {
+          "card_id": "9fc28e1f-f4ea-4bf8-9442-a36dba3b3b29",
+          "name": "Goblin Welder",
+          "relevance": 1,
+          "rationale": "Ability makes controller sacrifice an artifact and returns another; red Creature mana value 1."
+        }
+      ],
+      "unsupported": false,
+      "review": "Review covers artifact sacrifice as either cost or resolving action; no requirement for a free outlet.",
+      "filters": {
+        "colors": [
+          "R"
+        ],
+        "card_types": [
+          "Creature"
+        ],
+        "mana_value_min": 0,
+        "mana_value_max": 2
+      }
+    },
+    {
+      "id": "q14",
+      "category": "constraints",
+      "question": "A black instant that destroys a creature",
+      "qrels": [
+        {
+          "card_id": "59e7f2ae-4535-4191-98be-3e65b6b2befa",
+          "name": "Doom Blade",
+          "relevance": 1,
+          "rationale": "Black Instant mana value 2; destroys target nonblack creature."
+        },
+        {
+          "card_id": "94f0a572-e91c-4b56-a5d1-6cbbeabd210d",
+          "name": "Infernal Grasp",
+          "relevance": 1,
+          "rationale": "Black Instant mana value 2; destroys target creature with life-loss downside."
+        }
+      ],
+      "unsupported": false,
+      "review": "Query does not require destroying any color of creature, so Doom Blade remains relevant. Murder inspected and excluded by mana-value cap.",
+      "filters": {
+        "colors": [
+          "B"
+        ],
+        "card_types": [
+          "Instant"
+        ],
+        "mana_value_min": 0,
+        "mana_value_max": 2
+      }
+    },
+    {
+      "id": "q15",
+      "category": "constraints",
+      "question": "A white sorcery that destroys all creatures",
+      "qrels": [
+        {
+          "card_id": "34515b16-c9a4-4f98-8c77-416a7a523407",
+          "name": "Wrath of God",
+          "relevance": 1,
+          "rationale": "White Sorcery mana value 4; destroys all creatures and prevents regeneration."
+        },
+        {
+          "card_id": "d057289d-5e28-43d5-8ff3-4a1bc723477d",
+          "name": "Day of Judgment",
+          "relevance": 1,
+          "rationale": "White Sorcery mana value 4; destroys all creatures."
+        }
+      ],
+      "unsupported": false,
+      "review": "Exact inclusive boundary mana value 4; regeneration clause is not required.",
+      "filters": {
+        "colors": [
+          "W"
+        ],
+        "card_types": [
+          "Sorcery"
+        ],
+        "mana_value_min": 4,
+        "mana_value_max": 4
+      }
+    },
+    {
+      "id": "q16",
+      "category": "constraints",
+      "question": "A colorless artifact creature that returns another artifact from my graveyard to my hand when it dies",
+      "qrels": [
+        {
+          "card_id": "d07d3be3-f69d-4484-8467-cffd43871788",
+          "name": "Myr Retriever",
+          "relevance": 1,
+          "rationale": "Colorless Artifact Creature mana value 2; death returns another artifact to hand."
+        },
+        {
+          "card_id": "08c595da-9305-42a9-b72f-5ccc546edc01",
+          "name": "Junk Diver",
+          "relevance": 1,
+          "rationale": "Colorless Artifact Creature mana value 3; flying and same death recursion."
+        },
+        {
+          "card_id": "164f3f85-21fc-40b7-9871-4f303ba98428",
+          "name": "Scrap Trawler",
+          "relevance": 1,
+          "rationale": "Colorless Artifact Creature mana value 3; own death triggers return of an artifact with lesser mana value."
+        }
+      ],
+      "unsupported": false,
+      "review": "All reviewed positives satisfy both Artifact and Creature; conditional lesser-mana-value recursion is allowed by the question.",
+      "filters": {
+        "colors": [],
+        "card_types": [
+          "Artifact",
+          "Creature"
+        ],
+        "mana_value_min": 2,
+        "mana_value_max": 3
+      }
+    },
+    {
+      "id": "q17",
+      "category": "constraints",
+      "question": "A one-mana black and green creature that grows when I sacrifice artifacts or creatures",
+      "qrels": [
+        {
+          "card_id": "8fb48d65-406b-4231-83ea-9cf3bb8dff76",
+          "name": "Ravenous Squirrel",
+          "relevance": 1,
+          "rationale": "Both black and green; hybrid one-mana cost gives mana value 1; sacrifice trigger adds counter."
+        }
+      ],
+      "unsupported": false,
+      "review": "Colors are BOTH B and G despite hybrid cost; exact multicolor case, inclusive mana value 1.",
+      "filters": {
+        "colors": [
+          "B",
+          "G"
+        ],
+        "card_types": [
+          "Creature"
+        ],
+        "mana_value_min": 1,
+        "mana_value_max": 1
+      }
+    },
+    {
+      "id": "q18",
+      "category": "difficult_color_vs_identity",
+      "question": "A green creature that adds Squirrels whenever I make tokens",
+      "qrels": [
+        {
+          "card_id": "f15b3b76-d38a-48db-bb44-3296183c8641",
+          "name": "Chatterfang, Squirrel General",
+          "relevance": 1,
+          "rationale": "Green Creature; replacement effect creates extra Squirrels when tokens would be created."
+        }
+      ],
+      "unsupported": false,
+      "review": "Canonical colors are G while color identity includes B due to activation. Color controls must use colors, not commander identity.",
+      "filters": {
+        "colors": [
+          "G"
+        ],
+        "card_types": [
+          "Creature"
+        ],
+        "mana_value_min": 3,
+        "mana_value_max": 3
+      }
+    },
+    {
+      "id": "q19",
+      "category": "unsupported",
+      "question": "What is the current cheapest shop price for a near-mint foil Lightning Bolt?",
+      "qrels": [],
+      "unsupported": true,
+      "review": "No canonical card text can establish current seller prices, condition, or foil printing choice. Empty qrels mean unsupported by this evidence corpus, not proof that no related card will retrieve.",
+      "filters": {}
+    },
+    {
+      "id": "q20",
+      "category": "unsupported",
+      "question": "Which card guarantees I will win every tournament regardless of my deck and opponent?",
+      "qrels": [],
+      "unsupported": true,
+      "review": "No reviewed card text supports a universal competitive guarantee. This is a refusal/insufficient-evidence probe; do not assign a useful-card ranking score.",
+      "filters": {}
+    }
+  ]
+}
