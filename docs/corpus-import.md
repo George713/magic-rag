@@ -1,5 +1,7 @@
 # Import and refresh the distinct-card corpus
 
+Imports retain the representative source printing's HTTPS image metadata and card-page URL separately from canonical card text. Ordinary cards expose one image; double-faced cards retain named images for both faces when supplied. Retrieval cards expose `images: [{name, url}]` and `source_url`. Saved turns freeze these fields, so later corpus refreshes cannot change historical previews or selected assets. Existing databases migrate additively; older turns without image metadata stay readable. Image loading failures leave card text and retrieval details available. Click a preview to enlarge it centrally, then use **Close image** or Escape to return.
+
 From PowerShell in the repository root:
 
 ```powershell
