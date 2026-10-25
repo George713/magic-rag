@@ -7,7 +7,7 @@
  export let busy = false;
  export let onselect: (conversation: Conversation | null) => void;
  let conversations: ConversationSummary[] = [];
- let loading = false;
+ export let loading = false;
  let error = '';
  let pending: Promise<void> = Promise.resolve();
  async function call(path: string, method='GET', body?: unknown) {

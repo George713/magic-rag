@@ -9,7 +9,7 @@
  import type {ExactFilters} from '$lib/filters';
  import {answerPath,streamAnswer} from '$lib/answer-stream';
  let question='';let traces:Trace[]=[];let filters:ExactFilters={};let conversationId:string|null=null;
- let history:ConversationHistory;let busy=false;let generating=false;let ready=false;let error='';
+ let history:ConversationHistory;let busy=false;let navigationLoading=false;let generating=false;let ready=false;let error='';
  let providerMessage='Remote generation is not configured.';let mode='keyword';let operation=0;
  let controller:AbortController|null=null;let active:Trace|null=null;let historyOpen=false;let filtersOpen=false;
  let settings={keyword_candidates:20,vector_candidates:20,rrf_constant:60,evidence_limit:8,rerank_candidates:40};
@@ -19,7 +19,7 @@
  onMount(async()=>{ready=true;try{providerMessage=(await(await fetch('/api/provider')).json()).message;}catch{providerMessage='Provider status is unavailable. Retrieval remains available.';}});
  onDestroy(()=>controller?.abort());
  async function search(event:SubmitEvent){
-  event.preventDefault();if(busy)return;busy=true;error='';const current=++operation;const submitted=question;
+  event.preventDefault();if(busy || navigationLoading)return;busy=true;error='';const current=++operation;const submitted=question;
   try{
    await history.flush();const id=await history.ensureConversation();
    const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:submitted,mode,settings,filters,generate_answer:false,conversation_id:id})});
@@ -49,7 +49,7 @@
 <div class="app-shell">
  <aside class="history-panel" class:open={historyOpen} aria-label="Chat history">
   <div class="brand"><span aria-hidden="true">✦</span><strong>Magic RAG</strong><button class="mobile-close" aria-label="Close history" onclick={()=>historyOpen=false}>×</button></div>
-  <ConversationHistory bind:this={history} bind:conversationId {busy} onselect={select}/>
+  <ConversationHistory bind:this={history} bind:conversationId bind:loading={navigationLoading} {busy} onselect={select}/>
   <div class="local">● Local card workspace</div>
  </aside>
  <main>
@@ -67,15 +67,15 @@
   <div class="composer">
    {#if error}<p class="error" role="alert">{error}</p>{/if}
    <form onsubmit={search}>
-    <label class="sr-only" for="question">Your question</label><textarea id="question" bind:value={question} placeholder="Ask about a card or describe an ability…" required maxlength="10000" rows="2"></textarea>
-    <div class="composer-foot"><div><label class="sr-only" for="mode">Search mode</label><select id="mode" bind:value={mode} disabled={busy || !ready}><option value="keyword">Keyword · BM25</option><option value="vector">Vector · local embeddings</option><option value="hybrid">Hybrid · rank fusion</option><option value="hybrid_rerank">Hybrid + cross-encoder</option></select></div>{#if generating}<button type="button" class="stop" onclick={stopAnswer}>Stop answer ■</button>{:else}<button class="send" disabled={busy || !ready || !question.trim()}>{busy?'Retrieving…':'Send'}</button>{/if}</div>
+    <label class="sr-only" for="question">Your question</label><textarea id="question" bind:value={question} disabled={navigationLoading || !ready} placeholder="Ask about a card or describe an ability…" required maxlength="10000" rows="2"></textarea>
+    <div class="composer-foot"><div><label class="sr-only" for="mode">Search mode</label><select id="mode" bind:value={mode} disabled={busy || navigationLoading || !ready}><option value="keyword">Keyword · BM25</option><option value="vector">Vector · local embeddings</option><option value="hybrid">Hybrid · rank fusion</option><option value="hybrid_rerank">Hybrid + cross-encoder</option></select></div>{#if generating}<button type="button" class="stop" onclick={stopAnswer}>Stop answer ■</button>{:else}<button class="send" disabled={busy || navigationLoading || !ready || !question.trim()}>{busy?'Retrieving…':'Send'}</button>{/if}</div>
    </form>
    <p class="provider">{providerMessage}</p>
   </div>
  </main>
  <aside class="filters-panel" class:open={filtersOpen} aria-label="Filters">
   <div class="panel-heading"><h2>Filters</h2><button class="mobile-close" aria-label="Close filters" onclick={()=>filtersOpen=false}>×</button></div><p class="panel-intro">For your next message</p>
-  <FilterControls bind:filters={() => filters, value => {filters=value;void persistFilters();}} disabled={busy || !ready}/>
+  <FilterControls bind:filters={() => filters, value => {filters=value;void persistFilters();}} disabled={busy || navigationLoading || !ready}/>
   <details class="settings"><summary>Retrieval settings</summary><div class="settings-grid">
    <label>Keyword candidates<input type="number" min="1" max="1000" required bind:value={settings.keyword_candidates}/></label><label>Vector candidates<input type="number" min="1" max="1000" required bind:value={settings.vector_candidates}/></label><label>Fusion constant<input type="number" min="0" max="10000" required bind:value={settings.rrf_constant}/></label><label>Evidence limit<input type="number" min="1" max="1000" required bind:value={settings.evidence_limit}/></label><label>Reranker shortlist<input type="number" min="1" max="1000" required bind:value={settings.rerank_candidates}/></label>
   </div></details>
