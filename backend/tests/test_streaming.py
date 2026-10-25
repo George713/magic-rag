@@ -274,3 +274,26 @@ def test_invalid_stream_asset_selection_is_never_saved_as_success(tmp_path):
         turn = client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]
         assert turn["state"] == "failed"
         assert turn["trace"]["selected_evidence"][0]["card_id"] == "sample-delver"
+
+
+def test_http_adapter_accepts_assets_only_json_without_text(tmp_path):
+    class RemoteAssets(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            content = json.dumps({"assets": ["sample-delver"]})
+            yield ("data: " + json.dumps({"choices": [{"delta": {"content": content}, "finish_reason": None}]}) + "\n\n").encode()
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+
+    async def remote(request):
+        return httpx.Response(200, stream=RemoteAssets())
+
+    path = tmp_path / "assets.db"
+    ingest_sample(path)
+    provider = ChatCompletionsProvider(ProviderConfig("https://provider.example/chat/completions", "model", "secret", True), transport=httpx.MockTransport(remote))
+    with TestClient(create_app(path, provider=provider)) as client:
+        conversation_id, turn_id = saved_search(client)
+        response = client.post(f"/api/conversations/{conversation_id}/turns/{turn_id}/stream")
+        events = [json.loads(line) for line in response.text.splitlines()]
+        assert [event["event"] for event in events] == ["start", "done"]
+        assert events[-1]["generation"]["status"] == "completed"
+        assert events[-1]["generation"]["text"] == ""
+        assert events[-1]["generation"]["assets"][0]["card_id"] == "sample-delver"
