@@ -1,87 +1,54 @@
-﻿<script lang="ts">
+<script lang="ts">
  import { onMount } from 'svelte';
  import type { Conversation, ConversationSummary } from '$lib/conversations';
+ import type { ExactFilters } from '$lib/filters';
  import type { Trace } from '$lib/types';
  export let conversationId: string | null = null;
  export let busy = false;
- export let onselect: (trace: Trace | null) => void;
+ export let onselect: (conversation: Conversation | null) => void;
  let conversations: ConversationSummary[] = [];
- let current: Conversation | null = null;
- let selectedTurn: string | null = null;
  let loading = false;
  let error = '';
-
- async function call(path: string, method='GET') {
-  const response = await fetch(`/api/conversations${path}`, {method});
-  if (!response.ok) {
-   const result = await response.json();
-   throw new Error(typeof result.detail === 'string' ? result.detail : 'Conversation could not be loaded. Try again.');
-  }
+ let pending: Promise<void> = Promise.resolve();
+ async function call(path: string, method='GET', body?: unknown) {
+  const response = await fetch(`/api/conversations${path}`, {method,headers:body ? {'Content-Type':'application/json'} : undefined,body:body ? JSON.stringify(body) : undefined});
+  if (!response.ok) {const result=await response.json(); throw new Error(typeof result.detail === 'string' ? result.detail : 'Conversation could not be saved. Check your filters and try again.');}
   return response.status === 204 ? null : response.json();
  }
- async function refresh() { conversations = await call(''); }
- async function create() {
-  current = await call('', 'POST');
-  conversationId = current!.id;
-  selectedTurn = null;
-  await refresh();
-  return conversationId;
+ async function refresh() {conversations=await call('');}
+ function remember() {if (conversationId) localStorage.setItem('magic-rag-conversation',conversationId); else localStorage.removeItem('magic-rag-conversation');}
+ async function create() {const current:Conversation=await call('','POST'); conversationId=current.id; remember(); await refresh(); return current;}
+ export async function ensureConversation(): Promise<string> {return conversationId || (await create()).id;}
+ export function persistFilters(filters: ExactFilters) {
+  const snapshot=structuredClone(filters);
+  pending=pending.catch(() => {}).then(async () => {const id=await ensureConversation(); await call(`/${id}`,'PATCH',{filters:snapshot});});
+  void pending.catch(e => {error=e.message;});
+  return pending;
  }
- export async function ensureConversation(): Promise<string> {
-  return conversationId || await create();
- }
- export async function saved(trace: Trace) {
-  if (!conversationId) return;
-  current = await call(`/${conversationId}`);
-  selectedTurn = trace.turn_id || null;
-  await refresh();
- }
- async function action(run: () => Promise<void>) {
-  loading = true; error = '';
-  try { await run(); }
-  catch(e) { error = e instanceof Error ? e.message : 'Conversation request failed. Try again.'; }
-  finally { loading = false; }
- }
- async function open(id: string) {
-  current = await call(`/${id}`);
-  conversationId = id;
-  const latest = current!.turns.at(-1);
-  selectedTurn = latest?.id || null;
-  onselect(latest?.trace || null);
- }
- async function remove(id: string) {
-  await call(`/${id}`, 'DELETE');
-  if (conversationId === id) {
-   conversationId = null; current = null; selectedTurn = null; onselect(null);
-  }
+ export async function flush() {await pending;}
+ export async function saved(trace:Trace) {
+  const id=trace.conversation_id;
+  if (!id || id !== conversationId) return;
   await refresh();
  }
- function stateLabel(state: string) {
-  return ({retrieval_complete:'Retrieval complete',completed:'Completed',cancelled:'Cancelled',failed:'Failed',generating:'Generating'} as Record<string,string>)[state] || state;
- }
- onMount(() => { void action(refresh); });
+ async function action(run:() => Promise<void>) {loading=true;error='';try {await flush(); await run();} catch(e) {error=e instanceof Error ? e.message : 'Conversation request failed.';}finally{loading=false;}}
+ async function open(id:string) {const current=await call(`/${id}`);conversationId=id;remember();onselect(current);}
+ async function remove(id:string) {await call(`/${id}`,'DELETE');if(conversationId===id){conversationId=null;remember();onselect(null);}await refresh();}
+ onMount(() => {void action(async () => {await refresh();const id=localStorage.getItem('magic-rag-conversation');if(id && conversations.some(c => c.id===id)) await open(id);});});
 </script>
-
 <section aria-label="Conversations" aria-busy={loading}>
- <div class="history-heading"><h2>Saved conversations</h2><button class="new" disabled={busy || loading} onclick={() => action(async () => {await create(); onselect(null);})}>New conversation <span aria-hidden="true">+</span></button></div>
- {#if error}<p class="error" role="alert">{error}</p>{/if}
+ <button class="new" disabled={busy || loading} onclick={() => action(async () => {onselect(await create());})}>New chat <span aria-hidden="true">+</span></button>
+ <h2>Previous chats</h2>
+ {#if error}<p role="alert">{error}</p>{/if}
  <div class="conversation-list">
-  {#each conversations as conversation}
-   <div class:active={conversationId === conversation.id} class="conversation">
-    <button class="open" aria-label={`Open conversation: ${conversation.title}`} aria-pressed={conversationId === conversation.id} disabled={busy || loading} onclick={() => action(() => open(conversation.id))}>{conversation.title}</button>
-    <button class="delete" aria-label={`Delete conversation: ${conversation.title}`} disabled={busy || loading} onclick={() => action(() => remove(conversation.id))}>×</button>
-   </div>
-  {:else}<p class="empty">Your first search starts a saved conversation.</p>{/each}
+ {#each conversations as conversation}
+  <div class="conversation" class:active={conversationId===conversation.id}>
+   <button class="open" aria-label={`Open conversation: ${conversation.title}`} aria-pressed={conversationId===conversation.id} disabled={busy || loading} onclick={() => action(() => open(conversation.id))}>{conversation.title}</button>
+   <button class="delete" aria-label={`Delete conversation: ${conversation.title}`} disabled={busy || loading} onclick={() => action(() => remove(conversation.id))}>×</button>
+  </div>
+ {:else}<p class="empty">Your conversations will appear here.</p>{/each}
  </div>
- {#if current && current.turns.length}
-  <ol aria-label="Conversation turns">
-   {#each current.turns as turn, i}
-    <li><button class:selected={selectedTurn === turn.id} aria-label={`View turn ${i+1}: ${turn.question}`} aria-pressed={selectedTurn === turn.id} disabled={busy || loading} onclick={() => {selectedTurn=turn.id; onselect(turn.trace);}}><span class="number">{String(i+1).padStart(2,'0')}</span><span class="question">{turn.question}</span><span class="state">{stateLabel(turn.state)}</span></button></li>
-   {/each}
-  </ol>
- {/if}
 </section>
-
 <style>
- section{margin:0 0 32px;padding:18px 0;border-top:1px solid #cbd1c3;border-bottom:1px solid #cbd1c3;min-width:0}.history-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}h2{font:17px Georgia,serif;margin:0}button{font:inherit;cursor:pointer;border:0;border-radius:2px}button:disabled{opacity:.5;cursor:default}.new{font-size:11px;background:transparent;color:#294b38;padding:7px 0;white-space:nowrap}.new span{margin-left:10px}.conversation-list{display:flex;gap:8px;flex-wrap:wrap;max-height:170px;overflow:auto;margin-top:12px}.conversation{display:flex;align-items:stretch;border:1px solid #d2d8ca;border-radius:2px;background:#fffefa;min-width:0;max-width:100%}.conversation.active{border-color:#54705a;background:#e6eddf}.open{background:transparent;color:#344a39;padding:9px 10px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:280px}.delete{background:transparent;color:#7c5144;padding:4px 10px;font-size:18px;border-left:1px solid #d2d8ca}.delete:hover{background:#f4ded4}.open:hover{background:#dfe8d7}.empty{font-size:11px;line-height:1.6;color:#697063;margin:0}ol{padding:12px 0 0;margin:0;list-style:none}li+li{margin-top:5px}li button{width:100%;display:flex;align-items:baseline;gap:10px;padding:10px;text-align:left;background:transparent;color:#52634f;font-size:12px}li button:hover,li button.selected{background:#e8ecdf}.number{font:10px Consolas,monospace;color:#7b856f}.question{overflow-wrap:anywhere}.state{margin-left:auto;font-size:10px;white-space:nowrap;color:#697063}.error{font-size:12px;color:#9a392c}@media(max-width:550px){.history-heading{gap:10px}.state{white-space:normal;min-width:55px;text-align:right}.open{max-width:240px}h2{font-size:16px}}
+ section{min-width:0}h2{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#9aa99b;margin:30px 10px 12px}button{font:inherit;border:0;cursor:pointer;color:inherit}button:disabled{opacity:.45;cursor:default}.new{width:100%;display:flex;justify-content:space-between;padding:13px 14px;background:#28352b;border:1px solid #415143;border-radius:8px;color:#e3e9df;font-size:13px}.new:hover{background:#354738}.conversation-list{display:grid;gap:5px}.conversation{display:flex;border-radius:6px;min-width:0}.conversation.active,.conversation:hover{background:#253027}.open{text-align:left;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:12px 10px;background:transparent;font-size:12px}.delete{padding:8px 10px;background:transparent;color:#9aa99b;font-size:20px}.delete:hover{color:#f1bcb2}.empty,p[role=alert]{font-size:12px;line-height:1.7;color:#9aa99b;padding:0 10px}p[role=alert]{color:#f1bcb2}
 </style>
