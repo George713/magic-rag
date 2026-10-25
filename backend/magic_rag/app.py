@@ -9,6 +9,7 @@ from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from magic_rag.providers import generate_answer, provider_status, provider_from_env
 
 
 def default_db_path() -> Path:
@@ -41,13 +42,19 @@ def connect(path: Path):
 class SearchRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     mode: str = "keyword"
+    generate_answer: bool = False
 
 
-def create_app(db_path: Path | None = None) -> FastAPI:
+def create_app(db_path: Path | None = None, *, provider=None) -> FastAPI:
+    provider = provider if provider is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path):
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
+
+    @app.get("/api/provider")
+    def configured_provider():
+        return provider_status(provider)
 
     @app.get("/api/health")
     def health():
@@ -81,6 +88,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "stages": {"keyword": candidates}, "selected_evidence": candidates[:8],
                 "timings_ms": {"retrieval": (perf_counter() - start) * 1000},
                 "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},
-                "generation": {"status": "unconfigured", "message": "Remote generation is not configured."}}
+                "generation": generate_answer(provider, request.question, candidates[:8], str(uuid4())) if request.generate_answer else provider_status(provider)}
 
     return app

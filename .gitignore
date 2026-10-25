@@ -19,6 +19,7 @@
 *.db
 *.db-*
 .cache/
+.npm-cache/
 .scratch/
 
 # Python
