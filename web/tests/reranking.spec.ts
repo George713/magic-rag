@@ -12,6 +12,6 @@ test('reranking inspector shows before and after positions and model identity', 
  await expect(page.getByRole('heading', {name:'Fused candidates 3'})).toBeVisible();
  await expect(page.getByRole('heading', {name:'Reranked candidates 2'})).toBeVisible();
  await expect(page.getByText('Fused #2 → #1 · promoted 1', {exact:true})).toBeVisible();
- await expect(page.getByText('controlled-reranker', {exact:true})).toBeVisible();
+ await expect(page.getByText('reranker model', {exact:true}).locator('..').locator('pre')).toContainText('"model": "controlled-reranker"');
  await page.screenshot({path:'test-results/reranking.png',fullPage:true});
 });

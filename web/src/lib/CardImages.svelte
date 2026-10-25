@@ -1,12 +1,12 @@
 <script lang="ts">
  import type { Card } from '$lib/types';
  let { card }: {card: Card} = $props();
- let dialog: HTMLDialogElement;
+ let dialog = $state<HTMLDialogElement>();
  let selected = $state<{name:string; url:string} | null>(null);
  let failed = $state<string[]>([]);
  function enlarge(image: {name:string; url:string}) {
   selected = image;
-  dialog.showModal();
+  dialog?.showModal();
  }
 </script>
 
@@ -27,7 +27,7 @@
  </div>
  <dialog bind:this={dialog} aria-label={selected ? `${selected.name} enlarged image` : 'Enlarged card image'}>
   <div class="enlarged">
-   <button type="button" class="close" onclick={() => dialog.close()}>Close image</button>
+   <button type="button" class="close" onclick={() => dialog?.close()}>Close image</button>
    {#if selected}
     <img src={selected.url} alt={selected.name} onerror={() => failed = [...failed, selected!.url]} />
     <p>{selected.name}</p>
