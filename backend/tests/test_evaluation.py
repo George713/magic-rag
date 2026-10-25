@@ -10,7 +10,7 @@ from test_reranking import ControlledReranker
 def controlled_suite():
     return {"version":"controlled-v1", "review":"Controlled positive judgment for an independently known rank.",
             "source":{"snapshot":"controlled-sample-v1"},
-            "questions":[{"id":"q1", "category":"controlled", "question":"Sol Ring", "filters":{},
+            "questions":[{"id":"q1", "category":"controlled", "question":"Sol Ring artifact", "filters":{},
                           "qrels":[{"card_id":"sample-delver", "name":"Delver of Secrets // Insectile Aberration", "relevance":1, "rationale":"Controlled positive at rank two before reranking."}],
                           "unsupported":False, "review":"Controlled ranking fixture."}]}
 

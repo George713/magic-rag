@@ -70,10 +70,16 @@ def search_vectors(db, query: str, embedder: Embedder, limit: int = 20, filters:
         raise EmbeddingError("Embedding configuration is incompatible with this corpus. Re-ingest cards with the configured model and settings.")
     vector = checked_vector(embedder.query(query), int(embedder.config["dimensions"]))
     eligibility, parameters = (filters or ExactFilters()).sql()
-    return db.execute(f"""SELECT cards.*, matches.distance AS score FROM
+    return db.execute(f"""WITH matches AS
         (SELECT card_id, distance FROM card_vectors WHERE embedding MATCH ? AND k = ?
-         AND card_id IN (SELECT cards.card_id FROM cards WHERE {eligibility})) matches
-        JOIN cards ON cards.card_id = matches.card_id ORDER BY score, cards.card_id""", (vector, limit, *parameters)).fetchall()
+         AND card_id IN (SELECT cards.card_id FROM cards WHERE {eligibility})),
+        candidates AS (SELECT card_id FROM matches UNION
+            SELECT cards.card_id FROM cards WHERE exact_name_match(cards.name, ?) AND {eligibility})
+        SELECT cards.*, vec_distance_cosine(card_vectors.embedding, ?) AS score
+        FROM candidates JOIN cards ON cards.card_id = candidates.card_id
+        JOIN card_vectors ON card_vectors.card_id = cards.card_id
+        ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
+        (vector, limit, *parameters, query, *parameters, vector, query, limit)).fetchall()
 
 
 class BgeEmbedder:

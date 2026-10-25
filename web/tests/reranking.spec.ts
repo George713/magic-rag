@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 test('reranking inspector shows before and after positions and model identity', async ({page}) => {
  await page.goto('/');
  await page.getByLabel('Search mode').selectOption('hybrid_rerank');
- await page.getByLabel('Your question').fill('Sol Ring');
+ await page.getByLabel('Your question').fill('Sol Ring artifact');
  await page.getByText('Retrieval settings', {exact:true}).click();
  await page.getByLabel('Reranker shortlist').fill('2');
  await page.getByLabel('Evidence limit').fill('1');

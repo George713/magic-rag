@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from magic_rag.providers import generate_answer, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
-from .retrieval import fuse
+from .retrieval import exact_name_match, fuse
 from .conversations import register_conversations
 from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
@@ -31,6 +31,7 @@ def connect(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
+    db.create_function("exact_name_match", 2, exact_name_match, deterministic=True)
     register_filter_functions(db)
     load_vec(db)
     try:
@@ -125,7 +126,9 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 try:
                     rows = search_vectors(db, query, embedding_model, request.settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
                         FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                        WHERE card_fts MATCH ? AND {eligibility} ORDER BY score, cards.card_id LIMIT ?""", (expression, *filter_parameters, request.settings.keyword_candidates)).fetchall()
+                        WHERE card_fts MATCH ? AND {eligibility}
+                        ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
+                        (expression, *filter_parameters, query, request.settings.keyword_candidates)).fetchall()
                 except EmbeddingError as exc:
                     raise HTTPException(422, str(exc)) from exc
                 stages[branch] = []
@@ -137,7 +140,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 timings[branch] = (perf_counter() - stage_start) * 1000
         if request.mode in ("hybrid", "hybrid_rerank"):
             fusion_start = perf_counter()
-            stages["fused"] = fuse(stages, request.settings.rrf_constant)
+            stages["fused"] = fuse(stages, request.settings.rrf_constant, query=query)
             timings["fusion"] = (perf_counter() - fusion_start) * 1000
         candidates = stages["fused" if request.mode in ("hybrid", "hybrid_rerank") else request.mode]
         if request.mode == "hybrid_rerank":
@@ -151,7 +154,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         trace = {"trace_id": trace_id, "question": request.question, "query": query,
                 "mode": request.mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
                 "models": {**({"embedding": embedding_model.config} if request.mode != "keyword" else {}), **({"reranker":reranking_model.config} if request.mode == "hybrid_rerank" else {})},
-                "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
+                "settings": {**request.settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
                 "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": rewrite,

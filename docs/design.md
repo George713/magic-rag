@@ -41,6 +41,7 @@ A toy project for gaining hands-on experience with retrieval augmented generatio
 ## Accepted retrieval and ingestion decisions
 
 - Q12: BM25 keyword search and dense vector search, merged with reciprocal rank fusion, followed by a separate cross-encoder reranker. Accepted after explanation.
+- Exact full-name matches to the actual retrieval query take priority in all retrieval modes, ignoring capitalization and surrounding whitespace. Apply this before candidate, reranker-shortlist, and evidence limits, respecting filters and retaining raw scores. Other cards retain the existing relevance ordering.
 - Q14: BAAI/bge-small-en-v1.5 embeddings and cross-encoder/ms-marco-MiniLM-L6-v2 reranking as replaceable baselines. Accepted after explanation. No project-specific quality or memory measurements have been made.
 - Q15: manual, versioned ingestion with replacement-index activation only after successful completion. Ingestion includes downloading, normalizing, embedding, storing, and indexing the corpus; it applies to initial population and later refreshes. Accepted after clarification.
 

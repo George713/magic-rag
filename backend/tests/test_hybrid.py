@@ -30,7 +30,7 @@ def test_configured_counts_and_fusion_ties_keep_branch_only_cards_honest(tmp_pat
     model = ControlledEmbedder()
     ingest_sample(path, embedder=model)
     with TestClient(create_app(path, embedder=model)) as client:
-        trace = client.post("/api/search", json={"question":"Lightning Bolt", "mode":"hybrid",
+        trace = client.post("/api/search", json={"question":"Lightning Bolt card", "mode":"hybrid",
             "settings":{"keyword_candidates":1,"vector_candidates":1,"rrf_constant":0,"evidence_limit":1}}).json()
         assert [card["card_id"] for card in trace["stages"]["fused"]] == ["sample-lightning-bolt", "sample-sol-ring"]
         assert trace["stages"]["fused"][0]["score"] == 1.0

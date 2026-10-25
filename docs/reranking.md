@@ -1,5 +1,7 @@
 # Inspect local reranking
 
+An exact full-name match to the actual retrieval query remains first even when another card has a higher cross-encoder score. Comparison ignores capitalization and surrounding whitespace; filters still apply. The [shared name-priority policy](hybrid-search.md) applies before both shortlist and evidence limits. Scores remain raw model outputs, and final ranks and rank changes reflect the name priority.
+
 The complete-document window policy in [corpus-import.md](corpus-import.md) supersedes the initial long-card pair rejection below. All card windows are scored; queries that leave no evidence budget still fail explicitly.
 
 Prepare sample embeddings using [vector-search.md](vector-search.md), start both processes, and choose **Hybrid + cross-encoder**. The API mode name is `hybrid_rerank`. This adds an independent local `cross-encoder/ms-marco-MiniLM-L6-v2` pass after reciprocal rank fusion. It reads the actual query paired with each shortlisted card's readable document, including its name, properties, and all retained face text.
