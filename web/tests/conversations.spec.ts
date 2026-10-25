@@ -38,4 +38,3 @@ test('reopen original evidence and delete saved conversations after page reload'
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
  await page.screenshot({path:'test-results/conversations-mobile.png',fullPage:true});
 });
-
