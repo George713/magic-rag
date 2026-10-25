@@ -22,6 +22,13 @@ def conversation_context(turns):
         item = {"question": turn["question"], "query": turn["trace"]["query"]}
         if turn["state"] == "completed" and turn.get("answer"):
             item["answer"] = turn["answer"]
+        if turn["state"] == "completed":
+            assets = turn["trace"].get("generation", {}).get("assets", [])
+            if assets:
+                # Names/identities resolve conversational references; prior card
+                # text and source imagery do not become evidence for a new turn.
+                references = "\n".join(f'{asset["name"]} [{asset["card_id"]}]' for asset in assets)
+                item["shown_cards"] = references if len(references) <= ANSWER_CONTEXT_FIELD_LIMIT else references[:ANSWER_CONTEXT_FIELD_LIMIT-1] + "…"
         context.append(item)
     return context
 
@@ -31,6 +38,7 @@ def freeze_answer_context(query, turns):
     remaining = ANSWER_CONTEXT_CHARACTER_BUDGET
     truncated = len(turns) > CONTEXT_TURN_LIMIT
     for item in reversed(conversation_context(turns)):
+        truncated = truncated or item.get("shown_cards", "").endswith("…")
         clipped = {}
         for key, value in item.items():
             clipped[key] = value if len(value) <= ANSWER_CONTEXT_FIELD_LIMIT else value[:ANSWER_CONTEXT_FIELD_LIMIT-1] + "…"
