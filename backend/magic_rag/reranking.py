@@ -3,6 +3,7 @@ import math
 import os
 from pathlib import Path
 from typing import Protocol
+from .windows import token_windows
 
 
 class RerankingError(ValueError):
@@ -62,15 +63,26 @@ class MiniLmReranker:
         model = self.model
         return {"model":"cross-encoder/ms-marco-MiniLM-L6-v2", "revision":self._resolved_revision,
                 "max_tokens":min(int(model.tokenizer.model_max_length), int(model.model.config.max_position_embeddings)),
-                "activation":"identity", "input_policy":"reject-overlength", "score":"unbounded relevance logit (higher is better)"}
+                "activation":"identity", "input_policy":"query-budgeted-complete-document-windows-v1",
+                "aggregation":"maximum window logit", "score":"unbounded relevance logit (higher is better)"}
 
     def score(self, query: str, documents: list[str]):
         model = self.model
         limit = self.config["max_tokens"]
+        query_tokens = len(model.tokenizer.encode(query, add_special_tokens=False, truncation=False))
+        budget = limit - query_tokens - model.tokenizer.num_special_tokens_to_add(pair=True)
+        if budget < 1:
+            raise RerankingError("The query leaves no token budget for card evidence; shorten the query. Evidence was not truncated.")
+        pairs, spans = [], []
         for document in documents:
-            count = len(model.tokenizer.encode(query, document, add_special_tokens=True, truncation=False))
-            if count > limit:
-                raise RerankingError(f"Reranker query/card pair is {count} tokens; limit is {limit}. Evidence was not truncated.")
+            windows = token_windows(document, model.tokenizer, budget, RerankingError)
+            start = len(pairs)
+            for window in windows:
+                if len(model.tokenizer.encode(query, window, add_special_tokens=True, truncation=False)) > limit:
+                    raise RerankingError("A reranker window exceeds the pair budget. Evidence was not truncated.")
+                pairs.append((query, window))
+            spans.append((start,len(pairs)))
         if not documents:
             return []
-        return model.predict([(query, document) for document in documents], show_progress_bar=False).tolist()
+        scores = model.predict(pairs, batch_size=int(os.environ.get("MAGIC_RAG_RERANKER_BATCH_SIZE", "32")), show_progress_bar=False).tolist()
+        return [max(scores[start:end]) for start,end in spans]
