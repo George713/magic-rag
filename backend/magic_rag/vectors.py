@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 import sqlite_vec
+from .windows import token_windows
 
 
 class Embedder(Protocol):
@@ -36,15 +37,28 @@ def checked_vector(vector, dimensions):
     return sqlite_vec.serialize_float32(vector)
 
 
-def store_vectors(db, documents: list[tuple[str, str]], embedder: Embedder):
+def prepare_vectors(documents: list[tuple[str, str]], embedder: Embedder):
     config = embedder.config
     dimensions = int(config["dimensions"])
-    vectors = [(card_id, checked_vector(embedder.document(text), dimensions)) for card_id, text in documents]
+    texts = [text for _, text in documents]
+    encoded = embedder.documents(texts) if hasattr(embedder, "documents") else [embedder.document(text) for text in texts]
+    if len(encoded) != len(documents):
+        raise EmbeddingError("Embedding count does not match the complete document count.")
+    vectors = [(card_id, checked_vector(vector, dimensions)) for (card_id, _), vector in zip(documents, encoded)]
+    return config, vectors
+
+
+def write_vectors(db, config, vectors):
+    dimensions = int(config["dimensions"])
     db.execute("DROP TABLE IF EXISTS card_vectors")
     db.execute(f"CREATE VIRTUAL TABLE card_vectors USING vec0(card_id TEXT PRIMARY KEY, embedding float[{dimensions}] distance_metric=cosine)")
     db.executemany("INSERT INTO card_vectors(card_id, embedding) VALUES (?, ?)", vectors)
     db.execute("DELETE FROM embedding_config")
     db.execute("INSERT INTO embedding_config VALUES (?)", (json.dumps(config, sort_keys=True),))
+
+
+def store_vectors(db, documents: list[tuple[str, str]], embedder: Embedder):
+    write_vectors(db, *prepare_vectors(documents, embedder))
 
 
 def search_vectors(db, query: str, embedder: Embedder, limit: int = 20):
@@ -89,7 +103,8 @@ class BgeEmbedder:
         model = self.model
         return {"model": "BAAI/bge-small-en-v1.5", "revision": self._resolved_revision, "dimensions": 384,
                 "normalization": True, "query_instruction": "Represent this sentence for searching relevant passages: ",
-                "input_policy": "reject-overlength", "max_tokens": int(model.max_seq_length)}
+                "input_policy": "complete-document-windows-v1;reject-overlength-query", "max_tokens": int(model.max_seq_length),
+                "aggregation":"token-weighted normalized mean", "document_window_tokens":int(model.max_seq_length)-model.tokenizer.num_special_tokens_to_add(pair=False)}
 
     def _encode(self, text: str):
         model = self.model
@@ -99,7 +114,30 @@ class BgeEmbedder:
         return model.encode(text, normalize_embeddings=True, convert_to_numpy=True).tolist()
 
     def document(self, text: str):
-        return self._encode(text)
+        return self.documents([text])[0]
+
+    def documents(self, texts: list[str]):
+        import numpy as np
+        model = self.model
+        chunks, spans, weights = [], [], []
+        for text in texts:
+            windows = token_windows(text, model.tokenizer, self.config["document_window_tokens"], EmbeddingError)
+            start = len(chunks)
+            chunks.extend(windows)
+            spans.append((start,len(chunks)))
+            weights.extend(max(1,len(model.tokenizer.encode(window, add_special_tokens=False, truncation=False))) for window in windows)
+        if not chunks:
+            return []
+        vectors = model.encode(chunks, batch_size=int(os.environ.get("MAGIC_RAG_EMBEDDING_BATCH_SIZE", "32")),
+                               normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=True)
+        results = []
+        for start, end in spans:
+            mean = np.average(vectors[start:end], axis=0, weights=weights[start:end])
+            norm = np.linalg.norm(mean)
+            if not np.isfinite(norm) or norm == 0:
+                raise EmbeddingError("Document window aggregation produced an invalid vector.")
+            results.append((mean / norm).tolist())
+        return results
 
     def query(self, text: str):
         return self._encode(self.config["query_instruction"] + text)

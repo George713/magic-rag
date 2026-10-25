@@ -1,0 +1,50 @@
+# Import and refresh the distinct-card corpus
+
+From PowerShell in the repository root:
+
+```powershell
+uv sync --extra models --python 3.11
+uv run --extra models --python 3.11 python -m magic_rag import
+```
+
+This manual command discovers the current Scryfall `oracle_cards` export, downloads it to a temporary directory outside Git, normalizes canonical card information, embeds every distinct card locally, and builds both SQLite indexes. It reports `activated`, corpus identity, distinct-card count, and elapsed time only after successful validation and activation. Failures exit nonzero with an actionable error; the previous corpus remains active. The database location is `MAGIC_RAG_DB`, default `$HOME/.magic-rag/cards.db`.
+
+To reuse an already downloaded **gzip JSON Lines** export:
+
+```powershell
+uv run --extra models --python 3.11 python -m magic_rag import --source C:/path/oracle-cards.jsonl.gz
+```
+
+Local files receive a SHA-256 corpus identity and source filename, without inventing an export date. Live downloads additionally record the discovered bulk ID, update timestamp, URI, and checksum. `GET /api/corpus` reports active identity and metadata; `POST /api/corpus/import` explicitly runs a live refresh through the same application service. The interface shows the corpus identity on each retrieval trace. A sample command deliberately replaces the active corpus with the small controlled sample; use a separate `MAGIC_RAG_DB` for experiments if preserving a complete import.
+
+## Verified export contract
+
+Checked against the [official bulk documentation](https://scryfall.com/docs/api/bulk-data), [live bulk metadata](https://api.scryfall.com/bulk-data), and [card schema](https://scryfall.com/docs/api/cards) on 2026-10-25:
+
+- Discover `type=oracle_cards` from `/bulk-data`; its current fields are `jsonl_download_uri` and `compressed_size`. The export is gzip-compressed JSON Lines, one JSON card object per line. This importer does not assume a legacy JSON array or `download_uri` field.
+- Send an identifying `User-Agent` and `Accept` header. Verify compressed byte size, gzip integrity, JSON parsing, canonical fields, and nonempty distinct-card count before activation. Preserve the compressed bytes even if HTTP supplies content-encoding headers.
+- `oracle_id` identifies a distinct card across printings. Printing `id` is not a substitute. Duplicate printings collapse by canonical identity; conflicting normalized information for one identity fails explicitly. Records missing root identity, including unhandled reversible-card cases, stop the refresh rather than being silently discarded or assigned a printing identity.
+- Canonical `name`, `type_line`, and `oracle_text` provide English information independently of the chosen printing's `lang`. Localized `printed_*` fields are not used. The verified export contains 38,997 records, including 8 Japanese printings with English canonical fields; filtering solely on `lang=en` would lose those cards.
+- Retain every face's name, mana cost, type, colors, text, and power/toughness/loyalty/defense where supplied. Root numeric `cmc` supplies fractional mana value. Root colors are used when present; otherwise use the union of face colors. Color identity is a different property and is not substituted. Complete readable card documents remain stored alongside structured filter properties.
+
+The live downloader smoke on 2026-10-25 successfully fetched and parsed all 38,997 records, bulk ID `27bf3214-1271-490b-bdfe-c0be6c23d02e`, update `2026-10-25T09:01:57.491+00:00`, compressed size 25,108,904 bytes, SHA-256 `a1f17b0755da5cba940c9b1df71e758415e225ea9d97b9bf1bc699fedc3cfcc3`. Download compatibility is verified separately from embedding/import completion.
+
+## Complete-document handling
+
+This policy supersedes the initial card-length rejection described in the earlier vector/reranking slices. Card documents are stored unchanged in full. The application tokenizes without truncation and uses the tokenizer's offsets to create adjacent original-text windows. Every original character is covered, including all faces and trailing abilities. Each window is re-tokenized to verify its actual budget; splitting at a wordpiece boundary may require a smaller text span. No character-count estimate is used as the final token-length check.
+
+BGE document windows reserve model special-token costs from the 512-token budget. Every window is encoded, normalized, and included in a token-count-weighted mean that is normalized again to produce one card vector. This keeps the distinct-card retrieval unit and one vector per card. The compatibility identity records immutable model revision, query instruction, normalization, maximum length, window policy, and aggregation. Existing embeddings prepared under the earlier rejection policy must be rebuilt. Queries keep the published BGE instruction and are explicitly rejected if the complete instructed query exceeds the model budget.
+
+The cross-encoder reserves the complete query and pair special-token costs, then scores every document window under the remaining budget. The card score is the maximum window logit. A query leaving no evidence budget is rejected with a clear error. Each pair is checked before inference. The trace identifies this aggregation independently of the embedding model; changing the reranker never rebuilds card vectors.
+
+These are application policies, not model-author quality claims. Mean aggregation can dilute an isolated ability, while max aggregation rewards a strong matching passage. The benchmark must measure those tradeoffs. Neither policy changes the complete evidence text supplied to the answer provider.
+
+Embedding is batched (default 32 windows); optional `MAGIC_RAG_EMBEDDING_BATCH_SIZE` and `MAGIC_RAG_RERANKER_BATCH_SIZE` control inference batching. CPU is supported and full imports can take minutes. `OMP_NUM_THREADS` can limit CPU threading; execution settings are recorded in corpus metadata. GPU selection follows the existing model device settings. Datasets, model weights, and generated databases stay outside Git.
+
+## Safe activation and verification
+
+All normalization and embeddings finish before activation. Inside one SQLite transaction the service replaces cards, FTS5 data, vec0 data, compatibility metadata, and corpus identity; it validates counts and database integrity before committing. Any exception rolls back the whole replacement. Conversations and saved trace JSON remain in place, preserving their original corpus identity, source text, candidates, and selected evidence.
+
+`uv run --python 3.11 pytest` covers first import, duplicate printings, all faces, Japanese printing/canonical fields, fractional values, successful replacement, source and embedding failures, missing identities, complete long documents, current HTTP metadata/gzip contract, truncated downloads, and an actual SQLite activation failure after both replacement indexes were written. All observations use the FastAPI boundary. `MAGIC_RAG_REAL_MODELS=1` enables separate real BGE/cross-encoder checks of long documents and oversized queries.
+
+Real complete-corpus embedding/import smoke is in progress in a separate temporary database; completion and search results will be recorded here when available. The downloader and both real-model long-input smokes have already passed.

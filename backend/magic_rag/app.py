@@ -60,7 +60,7 @@ class SearchRequest(BaseModel):
     conversation_id: str | None = None
 
 
-def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None) -> FastAPI:
+def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None, corpus_source=None) -> FastAPI:
     provider = provider if provider is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path):
@@ -69,6 +69,8 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
     conversations = register_conversations(app, lambda: connect(path))
     embedding_model = embedder or BgeEmbedder()
     reranking_model = reranker or MiniLmReranker()
+    from .corpus import register_corpus
+    register_corpus(app, lambda: connect(path), embedding_model, corpus_source)
 
     @app.get("/api/provider")
     def configured_provider():
