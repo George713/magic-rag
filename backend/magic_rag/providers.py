@@ -29,8 +29,10 @@ Use conversational context and the actual retrieval query only to resolve refere
 only selected card evidence establishes card facts. Conversation answers are not verified evidence.
 Do not invent card identities or assert authoritative rules-interaction rulings.
 When evidence does not establish a conclusion, explicitly acknowledge insufficient evidence.
-Return only a JSON object: {"text": "plain-text explanation", "citations": ["exact card_id from evidence"], "insufficient_evidence": false}.
-Every supported answer must cite at least one supplied card. Do not put citation markup in text;
+Return only a JSON object: {"text": "optional plain-text explanation", "citations": ["exact card_id from evidence"], "insufficient_evidence": false, "assets": ["exact card_id from evidence"]}.
+Select assets only from supplied evidence; the application resolves source images. Never supply image URLs.
+Text-only, assets-only, and combined answers are valid. Include usable text or at least one asset.
+Every supported prose answer must cite at least one supplied card. Do not put citation markup in text;
 the application renders the validated citations separately. Set insufficient_evidence to true
 when the supplied evidence cannot answer the question, and say so in text."""
 
@@ -169,9 +171,10 @@ def provider_from_env():
 
 class AnswerPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    text: str = Field(min_length=1, max_length=100000)
-    citations: list[str]
-    insufficient_evidence: bool
+    text: str = Field(default="", max_length=100000)
+    citations: list[str] = Field(default_factory=list)
+    insufficient_evidence: bool = False
+    assets: list[str] = Field(default_factory=list)
 
 
 def provider_status(provider):
@@ -187,13 +190,18 @@ def completed_answer(payload, evidence, *, streamed_text=None):
     cards = {card["card_id"]:card for card in evidence}
     if any(card_id not in cards for card_id in result.citations):
         raise ValueError("Unknown citation")
-    if not result.insufficient_evidence and not result.citations:
+    if any(card_id not in cards for card_id in result.assets):
+        raise ValueError("Unknown card asset")
+    if not result.text.strip() and not result.assets:
+        raise ValueError("Empty answer")
+    if result.text.strip() and not result.insufficient_evidence and not result.citations:
         raise ValueError("Missing citations")
     if streamed_text is not None and result.text != streamed_text:
         raise ValueError("Incomplete streamed answer")
     return {"status":"completed", "message":"Answer grounded in selected card evidence.",
             "text":result.text, "insufficient_evidence":result.insufficient_evidence,
-            "citations":[{"card_id":card_id,"name":cards[card_id]["name"]} for card_id in dict.fromkeys(result.citations)]}
+            "citations":[{"card_id":card_id,"name":cards[card_id]["name"]} for card_id in dict.fromkeys(result.citations)],
+            "assets":[cards[card_id] for card_id in dict.fromkeys(result.assets)]}
 
 
 def generate_answer(provider, question, evidence, session_id, *, context=None):
