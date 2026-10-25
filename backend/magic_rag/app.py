@@ -13,6 +13,8 @@ from magic_rag.providers import generate_answer, provider_status, provider_from_
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .retrieval import fuse
 from .conversations import register_conversations
+from .streaming import register_streaming
+from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 
 
@@ -25,6 +27,7 @@ def connect(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
+    register_filter_functions(db)
     load_vec(db)
     try:
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS card_fts USING fts5(card_id UNINDEXED, text)")
@@ -58,6 +61,7 @@ class SearchRequest(BaseModel):
     settings: RetrievalSettings = Field(default_factory=RetrievalSettings)
     generate_answer: bool = False
     conversation_id: str | None = None
+    filters: ExactFilters = Field(default_factory=ExactFilters)
 
 
 def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None, corpus_source=None) -> FastAPI:
@@ -67,6 +71,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
+    register_streaming(app, conversations, provider)
     embedding_model = embedder or BgeEmbedder()
     reranking_model = reranker or MiniLmReranker()
     from .corpus import register_corpus
@@ -94,6 +99,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         if not tokens:
             raise HTTPException(422, "Enter at least one word to search.")
         expression = " OR ".join('"' + token + '"' for token in tokens)
+        eligibility, filter_parameters = request.filters.sql()
         stages = {}
         timings = {}
         with connect(path) as db:
@@ -102,9 +108,9 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
             for branch in branches:
                 stage_start = perf_counter()
                 try:
-                    rows = search_vectors(db, request.question, embedding_model, request.settings.vector_candidates) if branch == "vector" else db.execute("""SELECT cards.*, bm25(card_fts) AS score
+                    rows = search_vectors(db, request.question, embedding_model, request.settings.vector_candidates, request.filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
                         FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                        WHERE card_fts MATCH ? ORDER BY score, cards.card_id LIMIT ?""", (expression, request.settings.keyword_candidates)).fetchall()
+                        WHERE card_fts MATCH ? AND {eligibility} ORDER BY score, cards.card_id LIMIT ?""", (expression, *filter_parameters, request.settings.keyword_candidates)).fetchall()
                 except EmbeddingError as exc:
                     raise HTTPException(422, str(exc)) from exc
                 stages[branch] = []
@@ -129,7 +135,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
             timings["reranking"] = (perf_counter() - rerank_start) * 1000
         trace_id = str(uuid4())
         trace = {"trace_id": trace_id, "question": request.question, "query": request.question,
-                "mode": request.mode, "filters": {}, "corpus": dict(corpus) if corpus else None,
+                "mode": request.mode, "filters": request.filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
                 "models": {**({"embedding": embedding_model.config} if request.mode != "keyword" else {}), **({"reranker":reranking_model.config} if request.mode == "hybrid_rerank" else {})},
                 "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],

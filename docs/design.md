@@ -1,6 +1,6 @@
 # Magic RAG proof of concept
 
-Status: architecture decisions accepted; implementation has not begun. Provider suitability and dataset compatibility still require verification.
+Status: local retrieval, persistent conversations, provider boundaries, streaming, filters, and corpus import are implemented. Scryfall's current export contract and local model execution have been verified. OpenCode Go workload suitability remains unresolved; deterministic provider tests do not establish live subscription support.
 
 ## Requested outcome
 
@@ -75,7 +75,8 @@ Checked 2026-10-25:
 - [OpenCode inference API](https://opencode.ai/v2/docs/console/api/inference/) documents direct authenticated API requests, including use from other clients.
 - [OpenCode Go](https://opencode.ai/v2/docs/console/go/) describes coding agents as its intended clients and requests typical coding-agent traffic. A Magic chat application's suitability is not established merely by API compatibility. Keep this as an unresolved provider constraint.
 - No Go embedding or dedicated reranking API was identified in the reviewed documentation; the accepted local components do not depend on these endpoints.
-- Scryfall bulk-data documentation could not yet be fetched (HTTP 403); dataset details remain under investigation.
+- Scryfall live metadata and complete download now work with identifying headers. The current `oracle_cards` contract supplies `jsonl_download_uri` and `compressed_size` for gzip JSON Lines; canonical `oracle_id` identifies distinct cards. The verified download has 38,997 records. [Corpus import and provenance](corpus-import.md) records the current contract, canonical-field handling, complete-document windows, atomic activation, and smoke results.
+- Windows Python 3.11.4 successfully loads SQLite FTS5 and sqlite-vec 0.1.6. Real BGE and MiniLM CPU smoke checks pass, including document windows and explicit oversized-query errors. Compatibility identities include immutable revisions and window/aggregation policy. [Vector search](vector-search.md) and [reranking](reranking.md) record execution and verification details.
 
 ## Decision records
 

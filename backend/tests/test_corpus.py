@@ -139,3 +139,18 @@ def test_download_uses_current_gzip_jsonl_contract_and_rejects_incomplete_export
         assert response.status_code == 422
         assert "compressed_size" in response.json()["detail"]
         assert client.get("/api/corpus").json() == before
+
+
+def test_imported_face_properties_filter_all_four_modes_before_selection(tmp_path):
+    class SingleReranker:
+        config = {"model":"controlled","revision":"1"}
+        def score(self, query, documents):
+            return [1.] * len(documents)
+    with TestClient(create_app(tmp_path / "cards.db",embedder=ControlledEmbedder(),reranker=SingleReranker(),corpus_source=FixtureSource())) as client:
+        assert client.post("/api/corpus/import").status_code == 200
+        for mode in ("keyword","vector","hybrid","hybrid_rerank"):
+            request = {"question":"Final ability","mode":mode,
+                       "filters":{"colors":["U"],"card_types":["Creature"],"mana_value_min":1.5,"mana_value_max":1.5}}
+            assert client.post("/api/search",json=request).json()["selected_evidence"][0]["card_id"] == "canonical-one"
+            request["filters"]["colors"] = ["R"]
+            assert client.post("/api/search",json=request).json()["selected_evidence"] == []

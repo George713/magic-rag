@@ -5,14 +5,15 @@
 
 <section class="answer" aria-label="Card explanation" aria-live="polite">
  <div class="heading"><h2>Card explanation</h2><span>{generation.status === 'completed' ? 'Evidence grounded' : generation.status.replaceAll('_', ' ')}</span></div>
- {#if generation.status === 'completed' && generation.text}
+ {#if generation.text}
   {#if generation.insufficient_evidence}<p class="insufficient">The selected evidence is insufficient to establish an answer.</p>{/if}
   <p class="text" data-testid="answer-text">{generation.text}</p>
-  {#if generation.citations?.length}
+  {#if generation.status === 'completed' && generation.citations?.length}
    <nav aria-label="Answer citations" data-testid="answer-citations"><span>Sources</span>{#each generation.citations as citation}<a href={`#card-${citation.card_id}`}>{citation.name} ↗</a>{/each}</nav>
   {/if}
   <p class="note">Check the card text below. This explanation is not an authoritative rules ruling.</p>
- {:else}<p class="status" data-testid="generation-status" role={generation.status === 'failed' ? 'alert' : 'status'}>{generation.message}</p>{/if}
+ {/if}
+ {#if generation.status !== 'completed'}<p class="status" data-testid="generation-status" role={generation.status === 'failed' ? 'alert' : 'status'}>{generation.message}</p>{/if}
 </section>
 
 <style>
