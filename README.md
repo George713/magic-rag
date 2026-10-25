@@ -2,7 +2,7 @@
 
 A local learning project for exploring retrieval augmented generation with **Magic: The Gathering** cards. The goal is a chat interface that finds relevant cards, explains them with citations, and lets you inspect how retrieval shaped the answer.
 
-**Status:** architecture and repository setup. The application is not implemented yet; there are no installation or run commands available.
+**Status:** the first local keyword-search slice is implemented. Search a controlled card sample through SvelteKit, FastAPI, and SQLite FTS5, then inspect complete evidence and retrieval provenance. [Windows setup, startup, and verification](docs/running.md).
 
 ## What we're building
 
