@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dataclasses import dataclass, field
 import json
 import os
+import re
 from urllib.parse import urlparse
 
 import httpx
@@ -53,6 +54,80 @@ class ChatCompletionsProvider:
                     "response_format": {"type": "json_object"}})
             response.raise_for_status()
             return json.loads(response.json()["choices"][0]["message"]["content"])
+
+    async def stream_answer(self, question, evidence, session_id):
+        if not self.config.suitability_confirmed:
+            raise RuntimeError("Provider workload suitability has not been confirmed")
+        source = [{"card_id": card["card_id"], "name": card["name"], "text": card["text"]} for card in evidence]
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), transport=self.transport, follow_redirects=False) as client:
+            async with client.stream("POST", self.config.url,
+                headers={"Authorization": f"Bearer {self.config.api_key}", "User-Agent": "magic-rag/0.1", "x-opencode-session": session_id},
+                json={"model": self.config.model, "stream": True, "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT + " Put the text property first."},
+                    {"role": "user", "content": json.dumps({"question": question, "selected_evidence": source})}],
+                    "response_format": {"type": "json_object"}}) as response:
+                response.raise_for_status()
+                content = ""
+                displayed = ""
+                finished = False
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        if not finished:
+                            raise ValueError("Stream ended before successful completion")
+                        yield {"result": json.loads(content)}
+                        return
+                    chunk = json.loads(data)
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    if choice.get("finish_reason"):
+                        if choice["finish_reason"] != "stop":
+                            raise ValueError("Provider did not complete the answer")
+                        finished = True
+                    fragment = choice.get("delta", {}).get("content") or ""
+                    content += fragment
+                    if len(content) > 200000:
+                        raise ValueError("Answer exceeds the supported output limit")
+                    text = partial_answer_text(content)
+                    if not text.startswith(displayed):
+                        raise ValueError("Provider changed previously streamed text")
+                    if len(text) > len(displayed):
+                        yield {"delta": text[len(displayed):]}
+                        displayed = text
+                raise ValueError("Provider stream disconnected before completion")
+
+
+def partial_answer_text(content):
+    """Decode only complete JSON string characters; hold split escapes/surrogate pairs."""
+    match = re.search(r'"text"\s*:\s*"', content)
+    if match is None:
+        return ""
+    raw = content[match.end():]
+    decoded = []
+    i = 0
+    while i < len(raw):
+        if raw[i] == '"':
+            break
+        if raw[i] != "\\":
+            decoded.append(raw[i])
+            i += 1
+            continue
+        if i + 1 >= len(raw):
+            break
+        length = 6 if raw[i + 1] == "u" else 2
+        if i + length > len(raw):
+            break
+        if length == 6 and 0xD800 <= int(raw[i + 2:i + 6], 16) <= 0xDBFF:
+            length = 12
+            if i + length > len(raw):
+                break
+        decoded.append(json.loads('"' + raw[i:i + length] + '"'))
+        i += length
+    return "".join(decoded)
 
 
 def provider_from_env():

@@ -2,6 +2,8 @@
 
 Answer generation is optional. Select **Include a cited explanation** to generate from the exact selected evidence in the retrieval trace. Every citation links to that card's complete text. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
 
+The browser now uses [streamed saved-turn answers and Stop](streaming.md). The synchronous search option described below remains available to API clients.
+
 ## Provider prerequisite
 
 Checked 2026-10-25: [OpenCode Go's workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) requests typical coding-agent traffic. Magic card Q&A suitability is unresolved. The [inference API](https://opencode.ai/v2/docs/console/api/inference/) documents compatible HTTP interfaces, but this does not establish workload suitability. No Go generation request was sent, no paid alternative was selected, and no live-provider smoke test was run. Confirm suitability with the provider before enabling requests.

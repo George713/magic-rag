@@ -13,6 +13,7 @@ from magic_rag.providers import generate_answer, provider_status, provider_from_
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .retrieval import fuse
 from .conversations import register_conversations
+from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 
@@ -70,6 +71,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
+    register_streaming(app, conversations, provider)
     embedding_model = embedder or BgeEmbedder()
     reranking_model = reranker or MiniLmReranker()
 
