@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
+from .retrieval import fuse
 
 
 def default_db_path() -> Path:
@@ -40,9 +41,17 @@ def connect(path: Path):
         db.close()
 
 
+class RetrievalSettings(BaseModel):
+    keyword_candidates: int = Field(default=20, ge=1, le=1000)
+    vector_candidates: int = Field(default=20, ge=1, le=1000)
+    rrf_constant: int = Field(default=60, ge=0, le=10000)
+    evidence_limit: int = Field(default=8, ge=1, le=1000)
+
+
 class SearchRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     mode: str = "keyword"
+    settings: RetrievalSettings = Field(default_factory=RetrievalSettings)
 
 
 def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None) -> FastAPI:
@@ -62,34 +71,43 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None)
     @app.post("/api/search")
     def search(request: SearchRequest):
         start = perf_counter()
-        if request.mode not in ("keyword", "vector"):
-            raise HTTPException(422, "Choose keyword or vector mode.")
+        if request.mode not in ("keyword", "vector", "hybrid"):
+            raise HTTPException(422, "Choose keyword, vector, or hybrid mode.")
         tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
         if not tokens:
             raise HTTPException(422, "Enter at least one word to search.")
         expression = " OR ".join('"' + token + '"' for token in tokens)
+        stages = {}
+        timings = {}
         with connect(path) as db:
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            stage_start = perf_counter()
-            try:
-                rows = search_vectors(db, request.question, embedding_model) if request.mode == "vector" else db.execute("""SELECT cards.*, bm25(card_fts) AS score
-                    FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                    WHERE card_fts MATCH ? ORDER BY score, cards.card_id LIMIT 20""", (expression,)).fetchall()
-            except EmbeddingError as exc:
-                raise HTTPException(422, str(exc)) from exc
-            stage_ms = (perf_counter() - stage_start) * 1000
-        candidates = []
-        for rank, row in enumerate(rows, 1):
-            card = dict(row)
-            card["colors"] = json.loads(card["colors"])
-            card["rank"] = rank
-            candidates.append(card)
+            branches = ("keyword", "vector") if request.mode == "hybrid" else (request.mode,)
+            for branch in branches:
+                stage_start = perf_counter()
+                try:
+                    rows = search_vectors(db, request.question, embedding_model, request.settings.vector_candidates) if branch == "vector" else db.execute("""SELECT cards.*, bm25(card_fts) AS score
+                        FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
+                        WHERE card_fts MATCH ? ORDER BY score, cards.card_id LIMIT ?""", (expression, request.settings.keyword_candidates)).fetchall()
+                except EmbeddingError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+                stages[branch] = []
+                for rank, row in enumerate(rows, 1):
+                    card = dict(row)
+                    card["colors"] = json.loads(card["colors"])
+                    card["rank"] = rank
+                    stages[branch].append(card)
+                timings[branch] = (perf_counter() - stage_start) * 1000
+        if request.mode == "hybrid":
+            fusion_start = perf_counter()
+            stages["fused"] = fuse(stages, request.settings.rrf_constant)
+            timings["fusion"] = (perf_counter() - fusion_start) * 1000
+        candidates = stages["fused" if request.mode == "hybrid" else request.mode]
         return {"trace_id": str(uuid4()), "question": request.question, "query": request.question,
                 "mode": request.mode, "filters": {}, "corpus": dict(corpus) if corpus else None,
-                "models": {"embedding": embedding_model.config} if request.mode == "vector" else {},
-                "settings": {"keyword_candidates": 20, "vector_candidates": 20, "evidence_limit": 8, "vector_metric": "cosine distance (lower is better)"},
-                "stages": {request.mode: candidates}, "selected_evidence": candidates[:8],
-                "timings_ms": {request.mode: stage_ms, "retrieval": (perf_counter() - start) * 1000},
+                "models": {"embedding": embedding_model.config} if request.mode != "keyword" else {},
+                "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)"},
+                "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
+                "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},
                 "generation": {"status": "unconfigured", "message": "Remote generation is not configured."}}
 
