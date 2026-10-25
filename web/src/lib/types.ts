@@ -3,6 +3,7 @@ export interface Card {
  colors: string[]; type_line: string; score: number; rank: number;
 }
 export interface Trace {
+ conversation_id?: string; turn_id?: string;
  trace_id: string; question: string; query: string; mode: string;
  filters: Record<string, unknown>; corpus: {id: string; metadata: string} | null;
  models: Record<string, unknown>; settings: Record<string, unknown>;

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from .conversations import register_conversations
 
 
 def default_db_path() -> Path:
@@ -41,6 +42,7 @@ def connect(path: Path):
 class SearchRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     mode: str = "keyword"
+    conversation_id: str | None = None
 
 
 def create_app(db_path: Path | None = None) -> FastAPI:
@@ -48,6 +50,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     with connect(path):
         pass
     app = FastAPI(title="Magic RAG", version="0.1.0")
+    conversations = register_conversations(app, lambda: connect(path))
 
     @app.get("/api/health")
     def health():
@@ -57,6 +60,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.post("/api/search")
     def search(request: SearchRequest):
+        if request.conversation_id is not None:
+            conversations.get(request.conversation_id)
         start = perf_counter()
         if request.mode != "keyword":
             raise HTTPException(422, "Only keyword mode is currently available.")
@@ -75,12 +80,15 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             card["colors"] = json.loads(card["colors"])
             card["rank"] = rank
             candidates.append(card)
-        return {"trace_id": str(uuid4()), "question": request.question, "query": request.question,
+        trace = {"trace_id": str(uuid4()), "question": request.question, "query": request.question,
                 "mode": "keyword", "filters": {}, "corpus": dict(corpus) if corpus else None,
                 "models": {}, "settings": {"keyword_candidates": 20, "evidence_limit": 8},
                 "stages": {"keyword": candidates}, "selected_evidence": candidates[:8],
                 "timings_ms": {"retrieval": (perf_counter() - start) * 1000},
                 "rewrite": {"status": "unavailable", "message": "Conversational rewriting is unavailable. Submitted text is searched as-is."},
                 "generation": {"status": "unconfigured", "message": "Remote generation is not configured."}}
+        if request.conversation_id is not None:
+            conversations.append_trace(request.conversation_id, trace)
+        return trace
 
     return app

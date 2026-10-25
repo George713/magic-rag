@@ -1,16 +1,23 @@
 <script lang="ts">
  import type { Trace } from '$lib/types';
+ import ConversationHistory from '$lib/ConversationHistory.svelte';
  let question = '';
  let trace: Trace | null = null;
  let busy = false;
  let error = '';
+ let conversationId: string | null = null;
+ let history: ConversationHistory;
+ function showSaved(saved: Trace | null) { trace=saved; question=saved?.question || ''; error=''; }
  async function search(event: SubmitEvent) {
   event.preventDefault(); busy = true; error = '';
+  const submittedQuestion = question;
   try {
-   const response = await fetch('/api/search', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({question, mode:'keyword'})});
+   const id = await history.ensureConversation();
+   const response = await fetch('/api/search', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({question:submittedQuestion, mode:'keyword',conversation_id:id})});
    const result = await response.json();
    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Enter a question containing at least one word.');
    trace = result;
+   await history.saved(trace!);
   } catch (e) { error = e instanceof Error ? e.message : 'Search failed. Try again.'; }
   finally { busy = false; }
  }
@@ -24,6 +31,7 @@
   <div class="eyebrow">01 / DISCOVER</div>
   <h1>A question.<br/>A trail of evidence.</h1>
   <p class="intro">Find cards by name or the words in their abilities. Follow the source text, one result at a time.</p>
+  <ConversationHistory bind:this={history} bind:conversationId {busy} onselect={showSaved}/>
   <form onsubmit={search}>
    <label for="question">Your question</label>
    <textarea id="question" bind:value={question} placeholder="Try Lightning Bolt or Delver…" required maxlength="10000" rows="4"></textarea>

@@ -42,3 +42,5 @@ Validated on Windows with uv-managed CPython 3.14.0, SQLite FTS5, Node 22.23.2, 
 ## Retrieval contract
 
 `POST /api/search` accepts `{ "question": "Delver", "mode": "keyword" }`. The response is a retrieval trace: `trace_id`, original `question`, actual `query`, `mode`, `filters`, `corpus`, `models`, effective `settings`, ranked `stages`, `selected_evidence`, `timings_ms`, `rewrite`, and `generation`. Each card has stable `card_id`, `name`, complete `text`, `mana_cost`, numeric `mana_value`, `colors`, `type_line`, `rank`, and raw `score`. Later stages can extend `stages` without changing card identity. `GET /api/health` reports SQLite version, FTS5 support, and card count.
+
+See [saved conversations](conversations.md) for local history, reopening original evidence, deletion, and the optional search `conversation_id`.
