@@ -20,6 +20,8 @@ Use background workers for genuinely independent ready work. Reuse idle workers 
 
 Only the integration owner mutates the integration worktree. Consume completion notifications, merge one branch at a time, verify affected application behavior, then release newly ready tickets. Clean merges are routine controller work; delegate conflicts to a worker with pointers to both contracts and commits. Other workers stay in their own worktrees until their handoff is integrated.
 
+Before releasing newly ready tickets, the integration owner completes [GitHub blocker reconciliation](../workflow.md#github-blocker-reconciliation). Completion means the verified prerequisite's satisfied GitHub relationships are removed and a fresh read confirms the remaining graph, while its issue stays open until PR merge. Record the implementing commit and reconciliation result in the run record. A failed GitHub update remains an incomplete coordination step.
+
 Wait on agent completion notifications or tool continuation results. Use an idle interval for independent useful work, rather than fixed sleep-and-Git-status polling. Keep progress messages about phase changes, findings, or blockers.
 
 ## Shared caches, isolated environments

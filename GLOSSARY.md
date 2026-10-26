@@ -23,3 +23,11 @@ _Avoid_: Deck optimization
 **Card explanation**:
 An explanation of a card's characteristics and abilities, grounded in the available card information.
 _Avoid_: Authoritative rules ruling
+
+**Legendary card**:
+A card whose type line includes the Legendary supertype.
+_Avoid_: Legendary creature (when referring to legendary cards of any card type)
+
+**Card asset**:
+A visual representation of a retrieved card selected for a response, using imagery of a representative printing and its faces where applicable.
+_Avoid_: Card text, printing (when referring to the visual representation itself)
