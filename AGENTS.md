@@ -2,6 +2,10 @@
 
 ## Agent skills
 
+### Spec implementation
+
+For `/implement-spec`, use this repository's version in [.agents/skills/implement-spec/SKILL.md](.agents/skills/implement-spec/SKILL.md).
+
 ### Issue tracker
 
 Track specifications and implementation issues in GitHub Issues. Before creating, reading, or updating work items, read [the tracker conventions](docs/agents/issue-tracker.md).

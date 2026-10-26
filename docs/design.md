@@ -1,6 +1,6 @@
 # Magic RAG proof of concept
 
-Status: architecture decisions accepted; implementation has not begun. Provider suitability and dataset compatibility still require verification.
+Status: local retrieval, persistent conversations, provider boundaries, streaming, filters, and corpus import are implemented. Scryfall's current export contract and local model execution have been verified. OpenCode Go workload suitability remains unresolved; deterministic provider tests do not establish live subscription support.
 
 ## Requested outcome
 
@@ -31,7 +31,7 @@ A toy project for gaining hands-on experience with retrieval augmented generatio
 - Interface: SvelteKit.
 - Backend: the user delegated Python versus Node.js. Python is selected for the local model and retrieval work.
 - Provider flexibility: answer generation is configurable. Go is preferred but remains subject to suitability; no alternative paid service is selected.
-- Corpus: target all distinct cards in English with current canonical text; collapse repeated printings. Scryfall is the proposed source pending export verification. Artwork variants, translations, prices, and historical wording are deferred.
+- Corpus: import distinct cards with current canonical English text from the verified Scryfall oracle-card export; collapse repeated printings and retain every face. Artwork variants, translations, prices, and historical wording are deferred.
 - Evidence: answers cite retrieved cards and acknowledge conclusions unsupported by the retrieved evidence.
 - Evaluation: approximately 20 benchmark questions comparing keyword-only, vector-only, hybrid, and hybrid-plus-reranker retrieval. Evaluate useful cards near the top and retrieval latency.
 - Conversations: persist across restarts; support starting and deleting conversations.
@@ -64,9 +64,9 @@ The same embedding model and compatible configuration encode stored cards and in
 - Q18: use conversation history in an additional remote-model call to produce a standalone retrieval query for follow-ups. Show the rewritten query in the inspector. Explicit filters persist until changed. This adds model usage and latency.
 - Q19: stream generated answers with a Stop button. Retrieval and its inspector remain usable independently when the remote model is unconfigured or unavailable. Show provider errors clearly and retain retrieved results.
 
-SQLite comparison: [FTS5](https://www.sqlite.org/fts5.html) supports full-text keyword retrieval and BM25 ranking. [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) adds vector search as a separate extension, including Python bindings. Choosing SQLite for all persistence would require maintaining the text and vector search tables and composing hybrid retrieval in the application. Neither database eliminates the separate embedding or cross-encoder models. SQLite runtime/extension compatibility has not been tested here.
+SQLite comparison: [FTS5](https://www.sqlite.org/fts5.html) supports full-text keyword retrieval and BM25 ranking. [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) adds vector search as a separate extension, including Python bindings. The implementation maintains both indexes and composes hybrid retrieval in the application. Both local models remain separate components. Windows runtime/extension compatibility is verified by real SQLite integration tests and local-model smoke checks.
 
-LanceDB was considered for integrated keyword/vector retrieval and rejected in favor of one SQLite persistence system. SQLite FTS5 and sqlite-vec runtime compatibility remain to be tested during implementation.
+LanceDB was considered for integrated keyword/vector retrieval and rejected in favor of one SQLite persistence system. The implemented SQLite FTS5 and sqlite-vec path requires no database service or Docker.
 
 ## Verified integration facts
 
@@ -75,7 +75,8 @@ Checked 2026-10-25:
 - [OpenCode inference API](https://opencode.ai/v2/docs/console/api/inference/) documents direct authenticated API requests, including use from other clients.
 - [OpenCode Go](https://opencode.ai/v2/docs/console/go/) describes coding agents as its intended clients and requests typical coding-agent traffic. A Magic chat application's suitability is not established merely by API compatibility. Keep this as an unresolved provider constraint.
 - No Go embedding or dedicated reranking API was identified in the reviewed documentation; the accepted local components do not depend on these endpoints.
-- Scryfall bulk-data documentation could not yet be fetched (HTTP 403); dataset details remain under investigation.
+- Scryfall live metadata and complete download now work with identifying headers. The current `oracle_cards` contract supplies `jsonl_download_uri` and `compressed_size` for gzip JSON Lines; canonical `oracle_id` identifies distinct cards. The verified download has 38,997 records. [Corpus import and provenance](corpus-import.md) records the current contract, canonical-field handling, complete-document windows, atomic activation, and smoke results.
+- Windows Python 3.11.4 successfully loads SQLite FTS5 and sqlite-vec 0.1.6. Real BGE and MiniLM CPU smoke checks pass, including document windows and explicit oversized-query errors. Compatibility identities include immutable revisions and window/aggregation policy. [Vector search](vector-search.md) and [reranking](reranking.md) record execution and verification details.
 
 ## Decision records
 

@@ -1,0 +1,59 @@
+# Run the local application
+
+Requires Windows, Node.js 22+, and [uv](https://docs.astral.sh/uv/getting-started/installation/). Use 64-bit Python 3.11 with SQLite FTS5 and extension loading for the verified local-model runtime. The service checks FTS5 and sqlite-vec at startup and gives actionable setup errors. No Docker or database server is used.
+
+From the repository root in PowerShell:
+
+```powershell
+.\start.cmd
+```
+
+This starts both the Python backend and SvelteKit frontend in the same terminal, waits until they respond, and prints the interface URL. Open http://127.0.0.1:5173. Press **Ctrl+C** to stop both; if Windows asks whether to terminate the batch job, answer **Y**. If either server exits, the launcher stops the other one too. It never imports or replaces card data.
+
+Python dependencies (including local-model support) are managed by uv. On a fresh checkout, install frontend dependencies once with `npm.cmd --prefix web ci`. This checkout already has them installed. If a port is occupied, stop the existing server or use `.\start.cmd --backend-port 8002 --frontend-port 5174`; the launcher connects the frontend to the selected backend automatically. The command also works from another directory when invoked by its full path.
+
+To run the processes separately instead, use `uv run --extra models --python 3.11 python -m magic_rag serve` in the repository root and, in another terminal:
+
+```powershell
+cd web
+npm.cmd run dev
+```
+
+Open http://127.0.0.1:5173. With an imported corpus, search `Lightning Bolt`, `Delver`, or `Flying`. If the database is empty, follow the [complete corpus import](corpus-import.md). The optional `uv run python -m magic_rag sample` command replaces the active corpus with three controlled cards, deliberately including a repeated printing and a card with two faces. Use an explicit `MAGIC_RAG_DB` pointing to a separate demo database for sample experiments so the full `data/cards.db` corpus is preserved. The fixture is for repeatable behavior checks, not a complete or current card database.
+
+The default database is `data/cards.db` inside this project. Its path is anchored to the source checkout, so starting the backend from another working directory still uses the same file. The entire `data/` directory, database files, and SQLite WAL/SHM sidecars are ignored by Git. Set `MAGIC_RAG_DB` in the Python terminal only when intentionally overriding this location, such as for isolated tests. `MAGIC_RAG_API` in the SvelteKit process optionally changes the backend URL (default `http://127.0.0.1:8000`). Bindings are local-only. Provider credentials are not needed for retrieval. Without a suitable configured provider, generation and rewriting report their unavailable state and retrieval searches submitted text as-is. See [provider configuration](providers.md) before enabling remote requests.
+
+FTS5 uses Unicode word tokens joined with OR, treating punctuation and FTS syntax as ordinary input rather than exposing the FTS query language. BM25 scores sort ascending (more negative is better); canonical identity breaks ties. Default branch limits are 20 candidates and the evidence limit is 8; the interface exposes configurable settings. Every candidate retains complete readable text and structured properties. No-match and empty-corpus states remain usable. Additional modes require model acquisition and a compatible embedded corpus as described below.
+
+## Verification
+
+```powershell
+uv run pytest
+cd web
+npm run check
+npm run build
+npx playwright install chromium
+npm test
+```
+
+API tests use real isolated SQLite databases at the confirmed FastAPI seam. The browser test starts both processes with an isolated database and checks submitted queries, complete two-face evidence, corpus provenance, and no matches. Browser tests reserve ports 8001 and 5173. Tests never modify the default database. Generated databases, browser reports, dependencies, credentials, and caches are ignored.
+
+Validated on Windows with CPython 3.11.4, SQLite FTS5/sqlite-vec, Node 22.23.2, and Chromium. Model and full-corpus checks are recorded in their guides; live remote-provider support remains unverified. Dedicated browser fixture configurations for vector/hybrid/reranking/filters/streaming/rewriting are documented with those workflows.
+
+## Retrieval contract
+
+For optional local model acquisition and vector-only search, see [vector-search.md](vector-search.md).
+For fused keyword/vector rankings and configurable retrieval limits, see [hybrid-search.md](hybrid-search.md).
+For the fourth mode and before/after cross-encoder rankings, see [reranking.md](reranking.md).
+For a complete Scryfall corpus and atomic refreshes, see [corpus-import.md](corpus-import.md).
+For reproducible four-mode comparisons and reviewed relevance judgments, see [evaluation.md](evaluation.md).
+
+`POST /api/search` accepts `{ "question": "Delver", "mode": "keyword" }`. The response is a retrieval trace: `trace_id`, original `question`, actual `query`, `mode`, `filters`, `corpus`, `models`, effective `settings`, ranked `stages`, `selected_evidence`, `timings_ms`, `rewrite`, and `generation`. Each card has stable `card_id`, `name`, complete `text`, `mana_cost`, numeric `mana_value`, `colors`, `type_line`, `rank`, and raw `score`. Branch, fused, and reranked stages preserve canonical card identity. `GET /api/health` reports SQLite/extension versions, support, and corpus information.
+
+See [saved conversations](conversations.md) for local history, reopening original evidence, deletion, and the optional search `conversation_id`.
+
+See [exact card filters](filters.md) for color/type matching, inclusive mana-value ranges, retained controls, and candidate eligibility across retrieval modes.
+
+See [streaming and Stop](streaming.md) for incremental explanations and saved partial states.
+
+See [conversational queries](conversational-queries.md) for follow-up rewriting, original/actual query provenance, retained explicit filters, and transparent provider fallback.

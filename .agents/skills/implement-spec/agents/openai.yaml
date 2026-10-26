@@ -1,0 +1,7 @@
+interface:
+  display_name: "Implement Spec (repo version)"
+  short_description: "Repo workflow for parallel tickets and issue handoff"
+  default_prompt: "Use $implement-spec from .agents/skills/implement-spec/SKILL.md to implement the linked specification and tickets in this repository."
+
+policy:
+  allow_implicit_invocation: false

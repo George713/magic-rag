@@ -1,4 +1,4 @@
-# Credentials and machine-local configuration
+﻿# Credentials and machine-local configuration
 .env
 .env.*
 !.env.example
@@ -8,6 +8,7 @@
 .codex/
 
 # Local datasets, databases, model caches, and experiment output
+# Includes the default data/cards.db and its SQLite WAL/SHM sidecars.
 /data/
 /models/
 /artifacts/
@@ -19,6 +20,7 @@
 *.db
 *.db-*
 .cache/
+.npm-cache/
 .scratch/
 
 # Python
@@ -47,3 +49,9 @@ coverage/
 .DS_Store
 Thumbs.db
 *.log
+
+# Worktrees and test caches
+.worktrees/
+.uv-cache/
+test-results/
+playwright-report/
