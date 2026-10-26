@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from magic_rag.providers import generate_answer, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
-from .retrieval import fuse
+from .retrieval import exact_name_match, fuse
 from .conversations import register_conversations
 from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
@@ -31,6 +31,7 @@ def connect(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
+    db.create_function("exact_name_match", 2, exact_name_match, deterministic=True)
     register_filter_functions(db)
     load_vec(db)
     try:
@@ -43,6 +44,8 @@ def connect(path: Path):
             text TEXT NOT NULL, mana_cost TEXT NOT NULL, mana_value REAL NOT NULL,
             colors TEXT NOT NULL, type_line TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS corpus (id TEXT PRIMARY KEY, metadata TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS card_images (card_id TEXT PRIMARY KEY,
+            images TEXT NOT NULL, source_url TEXT);
     """)
     try:
         with db:
@@ -96,11 +99,13 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
     @app.post("/api/search")
     def search(request: SearchRequest):
         turns = []
+        conversation = None
         if request.conversation_id is not None:
-            turns = conversations.get(request.conversation_id)["turns"]
+            conversation = conversations.get(request.conversation_id)
+            turns = conversation["turns"]
         filters = request.filters
-        if turns and "filters" not in request.model_fields_set:
-            filters = ExactFilters.model_validate(turns[-1]["trace"]["filters"])
+        if conversation is not None and "filters" not in request.model_fields_set:
+            filters = ExactFilters.model_validate(conversation["current_filters"])
         start = perf_counter()
         if request.mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
             raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
@@ -125,19 +130,24 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 try:
                     rows = search_vectors(db, query, embedding_model, request.settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
                         FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                        WHERE card_fts MATCH ? AND {eligibility} ORDER BY score, cards.card_id LIMIT ?""", (expression, *filter_parameters, request.settings.keyword_candidates)).fetchall()
+                        WHERE card_fts MATCH ? AND {eligibility}
+                        ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
+                        (expression, *filter_parameters, query, request.settings.keyword_candidates)).fetchall()
                 except EmbeddingError as exc:
                     raise HTTPException(422, str(exc)) from exc
                 stages[branch] = []
                 for rank, row in enumerate(rows, 1):
                     card = dict(row)
                     card["colors"] = json.loads(card["colors"])
+                    presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
+                    card["images"] = json.loads(presentation["images"]) if presentation else []
+                    card["source_url"] = presentation["source_url"] if presentation else None
                     card["rank"] = rank
                     stages[branch].append(card)
                 timings[branch] = (perf_counter() - stage_start) * 1000
         if request.mode in ("hybrid", "hybrid_rerank"):
             fusion_start = perf_counter()
-            stages["fused"] = fuse(stages, request.settings.rrf_constant)
+            stages["fused"] = fuse(stages, request.settings.rrf_constant, query=query)
             timings["fusion"] = (perf_counter() - fusion_start) * 1000
         candidates = stages["fused" if request.mode in ("hybrid", "hybrid_rerank") else request.mode]
         if request.mode == "hybrid_rerank":
@@ -151,13 +161,15 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         trace = {"trace_id": trace_id, "question": request.question, "query": query,
                 "mode": request.mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
                 "models": {**({"embedding": embedding_model.config} if request.mode != "keyword" else {}), **({"reranker":reranking_model.config} if request.mode == "hybrid_rerank" else {})},
-                "settings": {**request.settings.model_dump(), "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
+                "settings": {**request.settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
                 "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": rewrite,
                 "answer_context":answer_context,
                 "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
+            if "filters" in request.model_fields_set:
+                conversations.update_filters(request.conversation_id, filters)
             conversations.append_trace(request.conversation_id, trace)
         return trace
 

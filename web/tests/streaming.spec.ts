@@ -8,9 +8,8 @@ test.beforeEach(async ({request}) => {
 
 async function ask(page: Page, question: string) {
  await page.goto('/');
- await page.getByLabel('Include a cited explanation').check();
  await page.getByLabel('Your question').fill(question);
- await page.getByRole('button',{name:'Search cards'}).click();
+ await page.getByRole('button',{name:'Send',exact:true}).click();
 }
 
 test('answer text arrives incrementally and completed answers reopen', async ({page}) => {
@@ -19,23 +18,24 @@ test('answer text arrives incrementally and completed answers reopen', async ({p
  await expect(page.getByRole('button',{name:'Stop answer'})).toBeVisible();
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
  await expect(page.getByRole('button',{name:'Stop answer'})).not.toBeVisible();
- await expect(page.getByTestId('answer-citations').getByRole('link')).toHaveAttribute('href','#card-sample-delver');
+ await expect(page.getByTestId('answer-citations').getByRole('link')).toHaveAttribute('href',/#turn-.*-card-sample-delver$/);
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
- await expect(page.getByRole('button',{name:'View turn 1: Delver'})).toContainText('Completed');
+ await expect(page.locator('.answer .heading')).toContainText('Evidence grounded');
 });
 
 test('Stop preserves incomplete output and reopening shows cancelled state', async ({page}) => {
  await ask(page,'Delver stop');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
  await page.getByRole('button',{name:'Stop answer'}).click();
- await expect(page.getByRole('button',{name:'Search cards'})).toBeEnabled();
+ await expect(page.getByLabel('Your question')).toBeEditable();
  await expect(page.getByTestId('generation-status')).toContainText('stopped');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: Delver stop',exact:true}).click();
- await expect(page.getByRole('button',{name:'View turn 1: Delver stop'})).toContainText('Cancelled');
+ await expect(page.locator('.answer .heading')).toContainText('cancelled');
+ await expect(page.getByTestId('generation-status')).toContainText('incomplete');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
  await expect(page.getByTestId('answer-citations')).not.toBeVisible();
  await page.setViewportSize({width:390,height:844});
@@ -47,10 +47,9 @@ test('provider failure keeps partial output, source cards, and subsequent turns 
  await ask(page,'Delver fail');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
  await expect(page.getByTestId('generation-status')).toContainText('failed');
- await expect(page.locator('article#card-sample-delver')).toContainText('Flying');
- await page.getByLabel('Include a cited explanation').uncheck();
+ await expect(page.locator('article[id$="-card-sample-delver"]')).toContainText('Flying');
  await page.getByLabel('Your question').fill('Lightning Bolt');
- await page.getByRole('button',{name:'Search cards'}).click();
+ await page.getByRole('button',{name:'Send',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
 });
 
@@ -68,19 +67,19 @@ test('Stop aborts upstream even when cancel HTTP stalls and cannot overwrite a l
   await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
   const boundedCancel = page.waitForEvent('requestfailed',{predicate:request => request.url().endsWith('/cancel')});
   await page.getByRole('button',{name:'Stop answer'}).click();
-  await expect(page.getByRole('button',{name:'Search cards'})).toBeEnabled();
+  await expect(page.getByLabel('Your question')).toBeEditable();
   await expect.poll(async () => {
    const conversations = await (await request.get('/api/conversations')).json();
    const detail = await (await request.get(`/api/conversations/${conversations[0].id}`)).json();
    return detail.turns[0].state;
   },{timeout:2000}).toBe('cancelled');
   expect(cancelRequested).toBe(true);
-  await page.getByLabel('Include a cited explanation').uncheck();
-  await page.getByLabel('Your question').fill('Lightning Bolt');
-  await page.getByRole('button',{name:'Search cards'}).click();
+   await page.getByLabel('Your question').fill('Lightning Bolt');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
   await boundedCancel;
   await expect(page.getByRole('alert')).not.toBeVisible();
-  await expect(page.getByTestId('actual-query')).toHaveText('Lightning Bolt');
+  const latest=page.locator('.turn').last();await latest.getByText('Retrieval details',{exact:true}).click();
+  await expect(latest.getByTestId('actual-query')).toHaveText('Lightning Bolt');
  } finally {release();}
 });

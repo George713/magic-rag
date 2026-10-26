@@ -1,5 +1,9 @@
 # Inspect hybrid search
 
+All search modes prioritize an exact full card name matching the actual retrieval query, ignoring capitalization (Unicode case folding) and surrounding whitespace. This priority applies before candidate limits, fusion shortlisting, reranking, and evidence selection, while respecting explicit filters. A split card whose full name differs is not an exact match. Nonexact matches retain their usual score ordering and card-identity tie-breaks. Vector retrieval includes eligible exact-name cards even when they would fall outside the nearest-neighbor shortlist, without exceeding the configured candidate limit. No reimport or re-embedding is required.
+
+Raw BM25, cosine-distance, fusion, and reranker scores remain unchanged; because exact-name priority precedes score, displayed scores need not be monotonic. The trace records this rule in `settings.name_priority`.
+
 After [preparing sample embeddings](vector-search.md), choose **Hybrid · rank fusion** in the search interface. The keyword and vector branches run independently against the same active SQLite corpus and query. The inspector keeps both candidate lists and a separate fused ranking. Selected evidence follows the fused ranking and contains one entry per canonical card identity.
 
 Reciprocal rank fusion adds `1 / (rrf_constant + branch_rank)` for each branch containing a card. Branch ranks start at 1; the default constant is 60. A card appearing in only one branch receives only that contribution. An empty branch contributes nothing. Fused scores sort descending; canonical card identity resolves exact ties. Raw BM25 and cosine-distance values are retained as branch signals, never mixed numerically with one another or with fusion scores. Both raw conventions sort ascending. The inspector labels each scale explicitly.

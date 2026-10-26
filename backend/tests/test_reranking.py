@@ -8,7 +8,7 @@ from magic_rag.reranking import RerankingError
 class ControlledReranker:
     config = {"model":"controlled-reranker","revision":"1","input_policy":"reject-overlength"}
     def score(self, query, documents):
-        assert query == "Sol Ring"
+        assert query in ("Sol Ring", "Sol Ring artifact")
         return [9.0 if "Flying" in text else 1.0 for text in documents]
 
 
@@ -17,7 +17,7 @@ def test_reranker_changes_evidence_order_and_preserves_fused_positions_and_signa
     embedder = ControlledEmbedder()
     ingest_sample(path, embedder=embedder)
     with TestClient(create_app(path, embedder=embedder, reranker=ControlledReranker())) as client:
-        trace = client.post("/api/search", json={"question":"Sol Ring", "mode":"hybrid_rerank",
+        trace = client.post("/api/search", json={"question":"Sol Ring artifact", "mode":"hybrid_rerank",
             "settings":{"rerank_candidates":2,"evidence_limit":1}}).json()
         assert trace["stages"]["fused"][0]["card_id"] == "sample-sol-ring"
         reranked = trace["stages"]["reranked"]

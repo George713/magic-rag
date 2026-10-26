@@ -9,15 +9,39 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 TRIAGE_LABELS = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix"}
+ISSUE_URL = r"https://github\.com/[^/\s]+/[^/\s]+/issues/[1-9][0-9]*"
 
 
 def section(body, title):
+    body = "\n".join(line for _, line in markdown_lines(body))
     heading = re.search(rf"(?im)^##[ \t]+{re.escape(title)}[ \t]*\r?$", body)
     if not heading:
         return ""
     tail = body[heading.end():]
     following = re.search(r"(?m)^#{1,2}[ \t]+", tail)
     return tail[:following.start()] if following else tail
+
+
+def markdown_lines(body):
+    """Inspect active Markdown, excluding fenced examples."""
+    fence = None
+    for number, line in enumerate(body.splitlines(), 1):
+        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if marker:
+            token = marker.group(1)
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+        elif fence is None:
+            yield number, line
+
+
+def blocker_references(text, issue_url):
+    repository_url = issue_url.rsplit("/issues/", 1)[0]
+    text = re.sub(rf"\[[^\]]*\]\(({ISSUE_URL})/?\)", r"\1", text)
+    return {match.group(0) if match.group(0).startswith("https://") else f"{repository_url}/issues/{match.group(1)}"
+            for match in re.finditer(rf"{ISSUE_URL}|(?<![\w/])#([1-9][0-9]*)", text)}
 
 
 def audit(snapshot):
@@ -49,6 +73,22 @@ def audit(snapshot):
         if roles != {"ready-for-human"}:
             errors.append(f"{label}: expected only ready-for-human as triage role; found {', '.join(sorted(roles)) or 'none'}.")
         body = issue["body"]
+        blockers = issue.get("blockedBy")
+        if not isinstance(blockers, list):
+            raise ValueError(f"{label}: blockedBy must be a complete list of native dependencies.")
+        remaining = section(body, "Remaining blockers")
+        reasons = {match.group(1).rstrip("/"): match.group(2) for _, line in markdown_lines(remaining)
+                   if (match := re.fullmatch(rf"\s*[-*]\s+({ISSUE_URL})/?\s*:\s*(\S.*)", line))}
+        blocker_urls = {blocker["url"].rstrip("/") for blocker in blockers}
+        if any(not re.fullmatch(ISSUE_URL, url) for url in blocker_urls):
+            raise ValueError(f"{label}: native dependencies must use canonical GitHub issue URLs.")
+        for _, line in markdown_lines(body):
+            entry = re.match(r"^\s*(?:[-*]\s+)?(?:\*\*)?Blocked by:(?:\*\*)?\s*(.+)$", line, re.IGNORECASE)
+            if entry:
+                blocker_urls.update(blocker_references(entry.group(1), issue["url"]))
+        for blocker_url in sorted(blocker_urls):
+            if blocker_url not in reasons:
+                errors.append(f"{label}: unreconciled blocker {blocker_url}; remove the satisfied relationship or document its unresolved reason in Remaining blockers.")
         status = section(body, "Implementation status")
         if not status.strip():
             errors.append(f"{label}: missing Implementation status section.")
@@ -61,18 +101,7 @@ def audit(snapshot):
         urls = {url.rstrip("/.,;") for url in re.findall(r"https?://[^\s<>)]+", evidence)}
         if not urls - {pr_url}:
             errors.append(f"{label}: add verification evidence links beyond the PR overview.")
-        fence = None
-        for line_number, line in enumerate(body.splitlines(), 1):
-            marker = re.match(r"^\s*(`{3,}|~{3,})", line)
-            if marker:
-                token = marker.group(1)
-                if fence is None:
-                    fence = token
-                elif token[0] == fence[0] and len(token) >= len(fence):
-                    fence = None
-                continue
-            if fence:
-                continue
+        for line_number, line in markdown_lines(body):
             if re.match(r"^\s*[-*]\s+\[ \]", line) and not re.search(r"\b(?:Blocked|Deferred):(?:\*\*)?[ \t]+\S", line, re.IGNORECASE):
                 errors.append(f"{label}: unchecked criterion on line {line_number} needs a Blocked: or Deferred: explanation.")
     return errors
@@ -88,8 +117,20 @@ def fetch_snapshot(number, repo):
     if repo:
         arguments.extend(["--repo", repo])
     pr = gh_json(arguments)
-    issues = [gh_json(["issue", "view", reference["url"], "--json", "number,url,state,labels,body"])
-              for reference in pr["closingIssuesReferences"]]
+    issues = []
+    for reference in pr["closingIssuesReferences"]:
+        issue = gh_json(["issue", "view", reference["url"], "--json", "number,url,state,labels,body"])
+        match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/issues/([1-9][0-9]*)/?", issue["url"])
+        if not match:
+            raise ValueError(f"Unsupported issue URL: {issue['url']}")
+        owner, repository, issue_number = match.groups()
+        pages = gh_json(["api", "--paginate", "--slurp",
+                         f"repos/{owner}/{repository}/issues/{issue_number}/dependencies/blocked_by?per_page=100"])
+        if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
+            raise ValueError(f"Issue #{issue_number}: missing native dependency data.")
+        issue["blockedBy"] = [{"number": blocker["number"], "url": blocker["html_url"], "state": blocker["state"].upper()}
+                              for page in pages for blocker in page]
+        issues.append(issue)
     return {"pr": pr, "issues": issues}
 
 

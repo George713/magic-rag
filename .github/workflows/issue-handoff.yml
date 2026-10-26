@@ -1,0 +1,76 @@
+name: Issue handoff
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, converted_to_draft]
+  issues:
+    types: [opened, edited, closed, reopened, labeled, unlabeled, deleted, transferred]
+  repository_dispatch:
+    types: [issue_dependencies]
+  workflow_dispatch:
+  # Native issue_dependencies webhooks are not a supported Actions trigger.
+  # Recheck relationships even when no issue edit or commit event is emitted.
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: issue-handoff
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # This job has a status-write token: execute only trusted default-branch
+      # tooling, including for fork PRs. Never check out or run PR-head code.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          script: |
+            const { spawnSync } = require('node:child_process');
+            const { owner, repo } = context.repo;
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            let failed = false;
+            for (const pr of prs) {
+              const result = spawnSync('python', [
+                'scripts/check_issue_handoff.py', '--pr', String(pr.number),
+                '--repo', `${owner}/${repo}`, '--json'
+              ], { encoding: 'utf8', timeout: 600000 });
+              let state = 'error';
+              try {
+                const report = JSON.parse(result.stdout);
+                if (result.status === 0 && report.status === 'pass') state = 'success';
+                else if (result.status === 1 && report.status === 'fail') state = 'failure';
+                core.info(`PR #${pr.number}: ${JSON.stringify(report)}`);
+              } catch {
+                core.error(`PR #${pr.number}: audit returned no valid report.`);
+              }
+              if (result.error) core.error(String(result.error));
+              if (result.stderr) core.info(result.stderr);
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha: pr.head.sha, state, context: 'Issue handoff',
+                description: state === 'success'
+                  ? 'Issue handoff and blocker reconciliation passed'
+                  : 'Issue handoff needs attention; see workflow output',
+                target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+              });
+              failed ||= state !== 'success';
+            }
+            if (failed) core.setFailed('One or more PR handoffs need attention.');

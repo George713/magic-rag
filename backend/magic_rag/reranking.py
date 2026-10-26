@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Protocol
 from .windows import token_windows
+from .retrieval import exact_name_match
 
 
 class RerankingError(ValueError):
@@ -28,7 +29,8 @@ def rerank(query: str, candidates: list[dict], model: Reranker) -> list[dict]:
         raise RerankingError("Reranker must return one finite score for every shortlisted card.")
     scored = [{**card, "fusion_score":card["score"], "fused_rank":card["rank"], "score":float(score)}
               for card, score in zip(candidates, scores)]
-    ordered = sorted(scored, key=lambda card: (-card["score"], card["card_id"]))
+    ordered = sorted(scored, key=lambda card: (
+        not exact_name_match(card["name"], query), -card["score"], card["card_id"]))
     return [{**card, "rank":rank, "rank_change":card["fused_rank"] - rank} for rank, card in enumerate(ordered, 1)]
 
 

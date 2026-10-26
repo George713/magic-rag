@@ -4,6 +4,14 @@ import json
 from uuid import uuid4
 
 from fastapi import HTTPException, Response
+from pydantic import BaseModel, ConfigDict
+
+from .filters import ExactFilters
+
+
+class FilterUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    filters: ExactFilters
 
 
 def timestamp():
@@ -27,18 +35,25 @@ class ConversationStore:
                 CREATE INDEX IF NOT EXISTS turns_by_conversation
                     ON conversation_turns(conversation_id, created_at);
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(conversations)")}
+            if "current_filters" not in columns:
+                db.execute("ALTER TABLE conversations ADD COLUMN current_filters TEXT")
+                for row in db.execute("SELECT id FROM conversations").fetchall():
+                    latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
+                    filters = json.loads(latest["trace"]).get("filters", {}) if latest else {}
+                    db.execute("UPDATE conversations SET current_filters = ? WHERE id = ?", (json.dumps(filters), row["id"]))
 
     def create(self):
         now = timestamp()
         conversation_id = str(uuid4())
         with self.connection() as db:
-            db.execute("INSERT INTO conversations VALUES (?, ?, ?, ?)",
-                       (conversation_id, "New conversation", now, now))
+            db.execute("INSERT INTO conversations (id, title, created_at, updated_at, current_filters) VALUES (?, ?, ?, ?, ?)",
+                       (conversation_id, "New conversation", now, now, "{}"))
         return self.get(conversation_id)
 
     def list(self):
         with self.connection() as db:
-            return [dict(row) for row in db.execute(
+            return [{**dict(row), "current_filters": json.loads(row["current_filters"] or "{}")} for row in db.execute(
                 "SELECT * FROM conversations ORDER BY updated_at DESC, id")]
 
     def get(self, conversation_id):
@@ -51,7 +66,15 @@ class ConversationStore:
                 saved = dict(turn)
                 saved["trace"] = json.loads(saved["trace"])
                 turns.append(saved)
-            return {**dict(row), "turns": turns}
+            return {**dict(row), "current_filters": json.loads(row["current_filters"] or "{}"), "turns": turns}
+
+    def update_filters(self, conversation_id, filters):
+        with self.connection() as db:
+            updated = db.execute("UPDATE conversations SET current_filters = ?, updated_at = ? WHERE id = ?",
+                                 (json.dumps(filters.model_dump(exclude_defaults=True)), timestamp(), conversation_id))
+            if updated.rowcount == 0:
+                raise HTTPException(404, "Conversation not found. Start a new conversation.")
+        return self.get(conversation_id)
 
     def append_trace(self, conversation_id, trace):
         now = timestamp()
@@ -132,5 +155,9 @@ def register_conversations(app, connection):
     def delete_conversation(conversation_id: str):
         store.delete(conversation_id)
         return Response(status_code=204)
+
+    @app.patch("/api/conversations/{conversation_id}")
+    def update_filters(conversation_id: str, request: FilterUpdate):
+        return store.update_filters(conversation_id, request.filters)
 
     return store

@@ -41,6 +41,7 @@ A toy project for gaining hands-on experience with retrieval augmented generatio
 ## Accepted retrieval and ingestion decisions
 
 - Q12: BM25 keyword search and dense vector search, merged with reciprocal rank fusion, followed by a separate cross-encoder reranker. Accepted after explanation.
+- Exact full-name matches to the actual retrieval query take priority in all retrieval modes, ignoring capitalization and surrounding whitespace. Apply this before candidate, reranker-shortlist, and evidence limits, respecting filters and retaining raw scores. Other cards retain the existing relevance ordering.
 - Q14: BAAI/bge-small-en-v1.5 embeddings and cross-encoder/ms-marco-MiniLM-L6-v2 reranking as replaceable baselines. Accepted after explanation. No project-specific quality or memory measurements have been made.
 - Q15: manual, versioned ingestion with replacement-index activation only after successful completion. Ingestion includes downloading, normalizing, embedding, storing, and indexing the corpus; it applies to initial population and later refreshes. Accepted after clarification.
 
@@ -63,6 +64,31 @@ The same embedding model and compatible configuration encode stored cards and in
 - Q17: SvelteKit chat interface and server routes forwarding to a local Python FastAPI service. Python owns retrieval, model inference, ingestion, answer-provider calls, and persistence. Provider credentials remain server-side.
 - Q18: use conversation history in an additional remote-model call to produce a standalone retrieval query for follow-ups. Show the rewritten query in the inspector. Explicit filters persist until changed. This adds model usage and latency.
 - Q19: stream generated answers with a Stop button. Retrieval and its inspector remain usable independently when the remote model is unconfigured or unavailable. Show provider errors clearly and retain retrieved results.
+
+## Accepted chat interface extension
+
+Accepted during the 2026-10-25 through 2026-10-26 design interview. The user requested specification publication and confirmed the proposed browser and API integration testing seams on 2026-10-26.
+
+Tracked in [specification #15: Conversational card chat with persistent filters and image assets](https://github.com/George713/magic-rag/issues/15).
+
+- Use a ChatGPT-style layout: previous conversations and New chat on the left, the conversation transcript and composer in the center, and filters on the right. Side panels can collapse on smaller screens.
+- Support card discovery, card explanations, and conversational follow-ups, with answers grounded in retrieved cards and clickable card references. Deck optimization and authoritative rules rulings remain deferred.
+- Keep checkbox controls for filters and add a separate Legendary checkbox. Checked means only legendary cards are eligible; unchecked imposes no legendary restriction. Combine it with the other explicit filters and apply the selected filters to the next submitted message.
+- Sending a message automatically retrieves evidence and generates a streamed answer, with a Stop button.
+- Put the retrieval inspector in an expandable Retrieval details section beneath each answer; reserve the right sidebar for filters.
+- Preserve existing matching semantics: colors match the exact selected set, and selected card types must all be present. Legendary adds another requirement.
+- Persist each conversation's current filters independently. Historical turns retain their original filter snapshots; viewing their retrieval details does not alter the current controls. This replaces the existing behavior of restoring controls when a historical turn is selected.
+- OpenCode Go remains the preferred answer provider. Its current official guidance still requests typical coding-agent traffic, so suitability for card assistance remains unresolved; checking its API does not settle that constraint. Rechecked [Go workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) on 2026-10-25. No live request or alternative paid provider has been authorized by this design interview.
+- Use a dark theme only; no light theme or theme switcher is required.
+- Initial controls: New chat, Delete chat, Send, Stop, and Copy answer. Message editing, answer regeneration, and conversation branching are deferred.
+- Each response supports optional model-written text and a separate card-asset section beneath it. Text-only, assets-only, and text-plus-assets responses are valid; explanatory prose and full card text are not mandatory alongside images.
+- The model selects card assets from retrieved evidence. The application resolves their image URLs from source metadata rather than accepting model-invented URLs.
+- Display card images directly in the asset section. Clicking an image opens an enlarged, centered view with a close control. A separate Open image link is not required.
+- Use one representative printing per distinct card, with both face images available for double-faced cards. Selecting alternate printings/artwork is deferred.
+- New conversations start without filter restrictions; existing conversations remember their current filters across application restarts.
+- On provider failure, preserve retrieved cards and show a clear error. When no cards match, explain this and suggest adjusting the query or filters, without changing the selected filters automatically.
+- Feasibility: Scryfall's [official card fields](https://github.com/scryfall/api-types/blob/main/src/objects/Card/CardFields.ts) include a card-page URL and optional image URLs at card or face level. These can support external links and previews without generated URLs from the answer model. A preview represents a printing, while retrieval and citations continue to identify distinct cards.
+- Live OpenCode Go workload suitability remains an integration uncertainty. The accepted interface and response behavior do not establish that the preferred provider supports this use case.
 
 SQLite comparison: [FTS5](https://www.sqlite.org/fts5.html) supports full-text keyword retrieval and BM25 ranking. [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) adds vector search as a separate extension, including Python bindings. The implementation maintains both indexes and composes hybrid retrieval in the application. Both local models remain separate components. Windows runtime/extension compatibility is verified by real SQLite integration tests and local-model smoke checks.
 
