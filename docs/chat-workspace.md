@@ -61,6 +61,12 @@ Independent standards and specification reviews of `6779cbd...c7e9172` each repo
 
 A follow-up corner regression reproduced the reported white corners: a preview clipped the source padding while the unrounded enlargement exposed pure-white pixels (255 brightness). Shared proportional corner clipping fixes the difference without changing image URLs, adding a background, or processing source files. Desktop/mobile browser screenshot tests inspect the rendered corner area, allowing normal antialiasing while rejecting white padding. The updated viewer screenshots use that opaque-corner fixture.
 
+## Pull request handoff verification
+
+On 2026-10-26, PR #24 passed its backend and frontend checks but failed **Issue handoff** with `PR has no closing issue links`. Its description already contained `Closes #23`; GitHub returned an empty `closingIssuesReferences` list because the PR still targeted `implement/spec-15` rather than the default branch. PR #22 had already merged, so PR #24 was retargeted to `main`.
+
+After retargeting, `python scripts/check_issue_handoff.py --pr 24 --json` passed with one checked issue (#23). This checks the issue's review label, implementation status, verification evidence, acceptance criteria, and native dependencies. The audit and application code required no changes. For future stacked PRs, preserve the prerequisite merge order and retarget to the default branch before the final handoff audit; a closing keyword on a non-default target does not establish the native link this audit requires.
+
 ## Verification boundaries
 
 FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source, and provider substitutes. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks do not establish live OpenCode Go support. Workload suitability and credentials remain unresolved; no live model request or paid fallback is used.
