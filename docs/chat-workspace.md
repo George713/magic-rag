@@ -36,11 +36,11 @@ Specification [#25](https://github.com/George713/magic-rag/issues/25), tickets [
 
 Answers omit the Sources navigation and duplicate linked names above selected images. All selected images, including both faces, appear in one row with 16px gaps, 210px thumbnails, and centered image-name captions. Horizontal scrolling stays inside the row. Focusing a thumbnail scrolls it fully into view for keyboard browsing. Assets without imagery retain a plain card name; image failures keep readable errors. Saved chats adopt the presentation without a data migration. Evidence and retrieval disclosures retain their content and default collapsed state.
 
-The shared enlarged view uses a transparent, frameless modal over the darkened page. The centered name floats below the source image; a semi-transparent X overlays its top-right corner. Clicking any part of the view or pressing Escape closes it and restores focus to its originating thumbnail. The same viewer serves answer assets and Retrieved evidence. Source pixels and printed borders are preserved.
+The shared enlarged view uses a transparent, frameless modal over the darkened page. The centered name floats below the source image; a semi-transparent X overlays its top-right corner. Clicking any part of the view or pressing Escape closes it and restores focus to its originating thumbnail. The same viewer serves answer assets and Retrieved evidence. Source pixels and printed borders are preserved. Preview and enlarged images share proportional rounded clipping so opaque white padding outside rounded card corners stays hidden at every display size.
 
 ### Verification for specification #25
 
-The existing deterministic browser chat seam covers the complete UI/service flow. No live provider request or corpus modification was made. The external image fixture is an illustrated 488 by 680 SVG with transparent corners; it supplies representative proportions and contrast rather than real card artwork.
+The existing deterministic browser chat seam covers the complete UI/service flow. No live provider request or corpus modification was made. The external image fixture is an illustrated 488 by 680 SVG with transparent corners and an opaque-white-corner mode for JPEG-style padding; it supplies representative proportions and contrast rather than real card artwork.
 
 | Acceptance case | Verification |
 | --- | --- |
@@ -53,11 +53,13 @@ The existing deterministic browser chat seam covers the complete UI/service flow
 | Preserved evidence/details and history | Closed disclosure checks, per-turn evidence access, saved answer reload and both-face reopening |
 | Missing or failed images | Legacy plain-name fallback and unavailable-image scenarios with readable evidence |
 
-Results on Windows, 2026-10-26: **11 chat/viewer browser tests passed; 4 streaming browser tests passed; 192 backend tests passed, 2 optional real-model tests skipped; frontend checks reported zero errors/warnings; production build passed**. Backend tests use a workspace-local temporary directory because the sandbox restricts the default OS pytest temp directory. Run `.venv/Scripts/python.exe -m pytest --basetemp .scratch/implementation/spec-25/pytest` from the repository root, and from `web` run `npx playwright test --config playwright.chat.config.ts`, `npx playwright test --config playwright.streaming.config.ts`, `npm run check`, and `npm run build`.
+Results on Windows, 2026-10-26: **13 chat/viewer browser tests passed; 4 streaming browser tests passed; 192 backend tests passed, 2 optional real-model tests skipped; frontend checks reported zero errors/warnings; production build passed**. Backend tests use a workspace-local temporary directory because the sandbox restricts the default OS pytest temp directory. Run `.venv/Scripts/python.exe -m pytest --basetemp .scratch/implementation/spec-25/pytest` from the repository root, and from `web` run `npx playwright test --config playwright.chat.config.ts`, `npx playwright test --config playwright.streaming.config.ts`, `npm run check`, and `npm run build`.
 
 Visual evidence uses deterministic fixture imagery: [desktop row](images/spec-25/row-desktop.png), [mobile row after swipe](images/spec-25/row-mobile.png), [desktop viewer](images/spec-25/viewer-desktop.png), and [mobile viewer](images/spec-25/viewer-mobile.png). Row screenshots show a browsed position, including intentionally clipped neighboring cards. The older verification sections below describe their original implementation checkpoints; visible citation/asset-name links were superseded by #25.
 
 Independent standards and specification reviews of `6779cbd...c7e9172` each reported zero findings. Both tickets have no incoming or outgoing blocking dependencies; fresh GitHub reads confirmed the empty graph after integration. The issues remain open pending PR merge.
+
+A follow-up corner regression reproduced the reported white corners: a preview clipped the source padding while the unrounded enlargement exposed pure-white pixels (255 brightness). Shared proportional corner clipping fixes the difference without changing image URLs, adding a background, or processing source files. Desktop/mobile browser screenshot tests inspect the rendered corner area, allowing normal antialiasing while rejecting white padding. The updated viewer screenshots use that opaque-corner fixture.
 
 ## Verification boundaries
 

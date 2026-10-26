@@ -51,7 +51,8 @@
  .row figure{flex:0 0 210px;max-width:none}
  .row figcaption{text-align:center}
  .preview{display:block;padding:0;background:transparent;border:0;border-radius:10px;cursor:zoom-in;max-width:100%;scroll-margin:6px}
- .preview img{display:block;width:100%;height:auto;border-radius:10px}
+ .preview img{display:block;width:100%;height:auto}
+ .preview img,.image-frame>img{border-radius:5.5% / 4%}
  figcaption,.unavailable{font:12px/1.5 'Segoe UI',sans-serif;color:#a5b5ab;overflow-wrap:anywhere;margin:8px 0 0}
  dialog{color:#e9eee9;background:transparent;border:0;padding:20px;margin:0;width:100vw;height:100dvh;max-width:100vw;max-height:100dvh;cursor:zoom-out}
  dialog[open]{display:flex;align-items:center;justify-content:center}

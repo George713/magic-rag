@@ -1,4 +1,4 @@
-import {test, expect, type Page} from '@playwright/test';
+import {test, expect, type Page, type Locator} from '@playwright/test';
 import {installCardImages} from './card-images';
 import {expandEvidence} from './evidence';
 
@@ -26,6 +26,33 @@ test('clicking an enlarged card closes it and returns focus to its thumbnail', a
  await expect(viewer).not.toBeVisible();
  await expect(thumbnail).toBeFocused();
 });
+
+for(const width of [1440,390]){
+test(`white image corners stay hidden when a preview is enlarged at ${width}px`, async ({page}, testInfo) => {
+ await page.setViewportSize({width,height:900});
+ await page.unroute('https://cards.test/**');
+ await installCardImages(page, {opaqueCorners:true});
+ await showCardAssets(page);
+ const thumbnail=page.getByRole('region',{name:'Card assets'}).getByRole('button',{name:'Enlarge Delver of Secrets',exact:true});
+ async function cornerBrightness(image:Locator){
+  await expect.poll(()=>image.evaluate(element=>(element as HTMLImageElement).naturalWidth)).toBe(488);
+  const box=(await image.boundingBox())!;
+  const size=Math.floor(box.width*.04);
+  const corner=await page.screenshot({clip:{x:Math.ceil(box.x),y:Math.ceil(box.y),width:size,height:size}});
+  return page.evaluate(async base64=>{
+   const screenshot=new Image();screenshot.src=`data:image/png;base64,${base64}`;await screenshot.decode();
+   const canvas=document.createElement('canvas');canvas.width=screenshot.width;canvas.height=screenshot.height;
+   const context=canvas.getContext('2d')!;context.drawImage(screenshot,0,0);
+   return Math.max(...Array.from(context.getImageData(0,0,canvas.width,canvas.height).data).filter((_,index)=>index%4!==3));
+  },corner.toString('base64'));
+ }
+ expect(await cornerBrightness(thumbnail.getByRole('img'))).toBeLessThan(180);
+ await thumbnail.click();
+ const viewer=page.getByRole('dialog');
+ expect(await cornerBrightness(viewer.getByRole('img'))).toBeLessThan(180);
+ await page.screenshot({path:testInfo.outputPath('viewer-opaque-corners.png')});
+});
+}
 
 for (const location of ['answer', 'evidence'] as const) {
  test(`all dismissal methods restore focus for ${location} images and saved faces reopen`, async ({page}) => {
