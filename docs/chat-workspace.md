@@ -67,6 +67,8 @@ On 2026-10-26, PR #24 passed its backend and frontend checks but failed **Issue 
 
 After retargeting, `python scripts/check_issue_handoff.py --pr 24 --json` passed with one checked issue (#23). This checks the issue's review label, implementation status, verification evidence, acceptance criteria, and native dependencies. The audit and application code required no changes. For future stacked PRs, preserve the prerequisite merge order and retarget to the default branch before the final handoff audit; a closing keyword on a non-default target does not establish the native link this audit requires.
 
+PR #28 had the same failure while targeting `fix/chat-preferences-and-images`, despite its `Closes #25`, `Closes #26`, and `Closes #27` lines. Retargeting it to `main` restored all three native links; `python scripts/check_issue_handoff.py --pr 28 --json` then passed with three checked issues. Merge PR #24 before PR #28: until then, PR #28's comparison with `main` also includes the pending PR #24 changes. Neither PR was merged as part of this repair.
+
 ## Verification boundaries
 
 FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source, and provider substitutes. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks do not establish live OpenCode Go support. Workload suitability and credentials remain unresolved; no live model request or paid fallback is used.
