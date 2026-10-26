@@ -69,6 +69,8 @@ After retargeting, `python scripts/check_issue_handoff.py --pr 24 --json` passed
 
 PR #28 had the same failure while targeting `fix/chat-preferences-and-images`, despite its `Closes #25`, `Closes #26`, and `Closes #27` lines. Retargeting it to `main` restored all three native links; `python scripts/check_issue_handoff.py --pr 28 --json` then passed with three checked issues. Merge PR #24 before PR #28: until then, PR #28's comparison with `main` also includes the pending PR #24 changes. Neither PR was merged as part of this repair.
 
+PR #28 subsequently merged first on 2026-10-26, bringing PR #24's application changes into `main` as well. Merging `main` back into PR #24 resolved the remaining conflict in this document by preserving the combined verification notes. The reconciled PR #24 differs from `main` only by this reconciliation note; its original application changes and PR #28's presentation changes are already integrated.
+
 ## Verification boundaries
 
 FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source, and provider substitutes. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks do not establish live OpenCode Go support. Workload suitability and credentials remain unresolved; no live model request or paid fallback is used.
