@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grilling (repo version)"
+  short_description: "Question a design and confirm its next stage"
+  default_prompt: "Use $grilling from .agents/skills/grilling/SKILL.md to question this design in rounds, confirm shared understanding, and ask which workflow stage to use next."

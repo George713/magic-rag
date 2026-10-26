@@ -19,7 +19,8 @@ test('answer text arrives incrementally and completed answers reopen', async ({p
  await expect(page.getByRole('button',{name:'Stop answer'})).toBeVisible();
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
  await expect(page.getByRole('button',{name:'Stop answer'})).not.toBeVisible();
- await expect(page.getByTestId('answer-citations').getByRole('link')).toHaveAttribute('href',/#turn-.*-card-sample-delver$/);
+ await expect(page.getByRole('navigation',{name:'Answer citations'})).toHaveCount(0);
+ await expandEvidence(page);await expect(page.locator('article[id$="-card-sample-delver"]')).toContainText('Flying');
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
@@ -38,7 +39,7 @@ test('Stop preserves incomplete output and reopening shows cancelled state', asy
  await expect(page.locator('.answer .heading')).toContainText('cancelled');
  await expect(page.getByTestId('generation-status')).toContainText('incomplete');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
- await expect(page.getByTestId('answer-citations')).not.toBeVisible();
+ await expect(page.getByRole('navigation',{name:'Answer citations'})).toHaveCount(0);
  await page.setViewportSize({width:390,height:844});
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
  await page.screenshot({path:'test-results/stopped-mobile.png',fullPage:true});

@@ -52,7 +52,7 @@ For reproducible four-mode comparisons and reviewed relevance judgments, see [ev
 
 See [saved conversations](conversations.md) for local history, reopening original evidence, deletion, and the optional search `conversation_id`.
 
-Chats also remember their current search mode, including unsent edits. Retrieved evidence starts collapsed; citation links open it. If a corpus imported before image support has no card images, use `uv run python -m magic_rag repair-images` to restore missing source imagery in the active corpus and saved answers without rebuilding embeddings. See [legacy image repair](chat-workspace.md#search-modes-collapsed-evidence-and-legacy-images).
+Chats also remember their current search mode, including unsent edits. Retrieved evidence starts collapsed; open its disclosure to inspect supporting cards. Answers show a horizontally scrollable image row with centered names; Sources and duplicate asset-name links are removed. If a corpus imported before image support has no card images, use `uv run python -m magic_rag repair-images` to restore missing source imagery in the active corpus and saved answers without rebuilding embeddings. See [legacy image repair](chat-workspace.md#search-modes-collapsed-evidence-and-legacy-images).
 
 See [exact card filters](filters.md) for color/type matching, inclusive mana-value ranges, retained controls, and candidate eligibility across retrieval modes.
 
