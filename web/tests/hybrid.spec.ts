@@ -1,3 +1,4 @@
+import {expandEvidence} from './evidence';
 import { test, expect } from '@playwright/test';
 test('hybrid inspector distinguishes branch scores and fused ranks', async ({page}) => {
  await page.goto('/');
@@ -14,7 +15,7 @@ test('hybrid inspector distinguishes branch scores and fused ranks', async ({pag
  await page.getByLabel('Evidence limit').fill('1');
  await page.getByLabel('Your question').fill('Sol Ring');
  await page.getByRole('button', {name:'Send', exact:true}).click();
- await expect(page.locator('.turn').last().getByRole('heading', {name:'Sol Ring',exact:true})).toBeVisible();
+ await expandEvidence(page);await expect(page.locator('.turn').last().getByRole('heading', {name:'Sol Ring',exact:true})).toBeVisible();
  await expect(page.getByText('1 cards', {exact:true})).toBeVisible();
  await page.screenshot({path:'test-results/hybrid.png',fullPage:true});
 });

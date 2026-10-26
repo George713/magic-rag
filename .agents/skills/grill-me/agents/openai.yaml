@@ -1,0 +1,7 @@
+interface:
+  display_name: "Grill Me (repo version)"
+  short_description: "Interview a design, then choose the next stage"
+  default_prompt: "Use $grill-me from .agents/skills/grill-me/SKILL.md to interview me about this design and confirm our shared understanding before choosing the next stage."
+
+policy:
+  allow_implicit_invocation: false

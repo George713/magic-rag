@@ -1,0 +1,7 @@
+interface:
+  display_name: "Grill with Docs (repo version)"
+  short_description: "Interview a design and record agreed domain docs"
+  default_prompt: "Use $grill-with-docs from .agents/skills/grill-with-docs/SKILL.md to interview me, record agreed domain documentation, and confirm shared understanding before choosing the next stage."
+
+policy:
+  allow_implicit_invocation: false

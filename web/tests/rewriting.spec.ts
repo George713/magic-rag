@@ -1,4 +1,5 @@
-﻿import {test,expect} from '@playwright/test';
+import {expandEvidence} from './evidence';
+import {test,expect} from '@playwright/test';
 
 test('contextual followup shows standalone topic and keeps explicit filters, then falls back visibly',async ({page}) => {
  await page.goto('/');
@@ -20,7 +21,7 @@ test('contextual followup shows standalone topic and keeps explicit filters, the
  await expect(second.getByTestId('rewrite-message')).toContainText('Explicit filters are unchanged');
  await expect(page.getByLabel('Red',{exact:true})).toBeChecked();
  await expect(page.getByLabel('Maximum mana value',{exact:true})).toHaveValue('2');
- await expect(second.getByRole('heading',{name:'Atog',exact:true})).toBeVisible();
+ await expandEvidence(second);await expect(second.getByRole('heading',{name:'Atog',exact:true})).toBeVisible();
  await page.getByLabel('Your question').fill('simulate rewrite failure');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const third=page.locator('section.turn').nth(2);
@@ -32,7 +33,7 @@ test('contextual followup shows standalone topic and keeps explicit filters, the
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const fourth=page.locator('section.turn').nth(3);
  await fourth.locator('.retrieval-details > summary').click();
- await expect(fourth.getByRole('heading',{name:'Atog',exact:true})).toBeVisible();
+ await expandEvidence(fourth);await expect(fourth.getByRole('heading',{name:'Atog',exact:true})).toBeVisible();
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: Find artifact-sacrifice creatures',exact:true}).first().click();
  const reopened=page.locator('section.turn').nth(1);

@@ -13,9 +13,10 @@
  let providerMessage='Remote generation is not configured.';let mode='keyword';let operation=0;
  let controller:AbortController|null=null;let active:Trace|null=null;let historyOpen=false;let filtersOpen=false;
  let settings={keyword_candidates:20,vector_candidates:20,rrf_constant:60,evidence_limit:8,rerank_candidates:40};
- function select(conversation:Conversation|null){traces=conversation?.turns.map(turn => turn.trace)||[];filters=structuredClone(conversation?.current_filters||{});question='';error='';historyOpen=false;}
+ function select(conversation:Conversation|null){traces=conversation?.turns.map(turn => turn.trace)||[];filters=structuredClone(conversation?.current_filters||{});mode=conversation?.current_mode||mode;question='';error='';historyOpen=false;}
  function update(turn:Trace,generation:Generation){traces=traces.map(t => t.turn_id===turn.turn_id ? {...t,generation} : t);}
  async function persistFilters(){await tick();try{await history.persistFilters(filters);}catch(e){error=e instanceof Error?e.message:'Filters could not be saved.';}}
+ async function persistMode(value:string){try{await history.persistMode(value);}catch(e){error=e instanceof Error?e.message:'Search mode could not be saved.';}}
  onMount(async()=>{ready=true;try{providerMessage=(await(await fetch('/api/provider')).json()).message;}catch{providerMessage='Provider status is unavailable. Retrieval remains available.';}});
  onDestroy(()=>controller?.abort());
  async function search(event:SubmitEvent){
@@ -49,7 +50,7 @@
 <div class="app-shell">
  <aside class="history-panel" class:open={historyOpen} aria-label="Chat history">
   <div class="brand"><span aria-hidden="true">✦</span><strong>Magic RAG</strong><button class="mobile-close" aria-label="Close history" onclick={()=>historyOpen=false}>×</button></div>
-  <ConversationHistory bind:this={history} bind:conversationId bind:loading={navigationLoading} {busy} onselect={select}/>
+  <ConversationHistory bind:this={history} bind:conversationId bind:loading={navigationLoading} {busy} {mode} onselect={select}/>
   <div class="local">● Local card workspace</div>
  </aside>
  <main>
@@ -68,7 +69,7 @@
    {#if error}<p class="error" role="alert">{error}</p>{/if}
    <form onsubmit={search}>
     <label class="sr-only" for="question">Your question</label><textarea id="question" bind:value={question} disabled={navigationLoading || !ready} placeholder="Ask about a card or describe an ability…" required maxlength="10000" rows="2"></textarea>
-    <div class="composer-foot"><div><label class="sr-only" for="mode">Search mode</label><select id="mode" bind:value={mode} disabled={busy || navigationLoading || !ready}><option value="keyword">Keyword · BM25</option><option value="vector">Vector · local embeddings</option><option value="hybrid">Hybrid · rank fusion</option><option value="hybrid_rerank">Hybrid + cross-encoder</option></select></div>{#if generating}<button type="button" class="stop" onclick={stopAnswer}>Stop answer ■</button>{:else}<button class="send" disabled={busy || navigationLoading || !ready || !question.trim()}>{busy?'Retrieving…':'Send'}</button>{/if}</div>
+    <div class="composer-foot"><div><label class="sr-only" for="mode">Search mode</label><select id="mode" bind:value={() => mode, value => {mode=value;void persistMode(value);}} disabled={busy || navigationLoading || !ready}><option value="keyword">Keyword · BM25</option><option value="vector">Vector · local embeddings</option><option value="hybrid">Hybrid · rank fusion</option><option value="hybrid_rerank">Hybrid + cross-encoder</option></select></div>{#if generating}<button type="button" class="stop" onclick={stopAnswer}>Stop answer ■</button>{:else}<button class="send" disabled={busy || navigationLoading || !ready || !question.trim()}>{busy?'Retrieving…':'Send'}</button>{/if}</div>
    </form>
    <p class="provider">{providerMessage}</p>
   </div>

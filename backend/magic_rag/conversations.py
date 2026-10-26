@@ -2,16 +2,27 @@
 from datetime import datetime, timezone
 import json
 from uuid import uuid4
+from typing import Literal
 
 from fastapi import HTTPException, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .filters import ExactFilters
 
 
-class FilterUpdate(BaseModel):
+SearchMode = Literal['keyword', 'vector', 'hybrid', 'hybrid_rerank']
+
+
+class ConversationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    filters: ExactFilters
+    filters: ExactFilters | None = None
+    mode: SearchMode | None = None
+
+    @model_validator(mode='after')
+    def require_preference(self):
+        if not self.model_fields_set or any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError('Provide filters or a search mode; preferences cannot be null.')
+        return self
 
 
 def timestamp():
@@ -35,6 +46,7 @@ class ConversationStore:
                 CREATE INDEX IF NOT EXISTS turns_by_conversation
                     ON conversation_turns(conversation_id, created_at);
             """)
+            db.execute('BEGIN IMMEDIATE')
             columns = {row["name"] for row in db.execute("PRAGMA table_info(conversations)")}
             if "current_filters" not in columns:
                 db.execute("ALTER TABLE conversations ADD COLUMN current_filters TEXT")
@@ -42,6 +54,13 @@ class ConversationStore:
                     latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
                     filters = json.loads(latest["trace"]).get("filters", {}) if latest else {}
                     db.execute("UPDATE conversations SET current_filters = ? WHERE id = ?", (json.dumps(filters), row["id"]))
+            if "current_mode" not in columns:
+                db.execute("ALTER TABLE conversations ADD COLUMN current_mode TEXT NOT NULL DEFAULT 'keyword'")
+                for row in db.execute("SELECT id FROM conversations").fetchall():
+                    latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
+                    mode = json.loads(latest["trace"]).get("mode", "keyword") if latest else "keyword"
+                    if mode in ('keyword', 'vector', 'hybrid', 'hybrid_rerank'):
+                        db.execute("UPDATE conversations SET current_mode = ? WHERE id = ?", (mode, row["id"]))
 
     def create(self):
         now = timestamp()
@@ -69,9 +88,19 @@ class ConversationStore:
             return {**dict(row), "current_filters": json.loads(row["current_filters"] or "{}"), "turns": turns}
 
     def update_filters(self, conversation_id, filters):
+        return self.update_preferences(conversation_id, filters=filters)
+
+    def update_preferences(self, conversation_id, *, filters=None, mode=None):
+        assignments = ['updated_at = ?']
+        values = [timestamp()]
+        if filters is not None:
+            assignments.append('current_filters = ?')
+            values.append(json.dumps(filters.model_dump(exclude_defaults=True)))
+        if mode is not None:
+            assignments.append('current_mode = ?')
+            values.append(mode)
         with self.connection() as db:
-            updated = db.execute("UPDATE conversations SET current_filters = ?, updated_at = ? WHERE id = ?",
-                                 (json.dumps(filters.model_dump(exclude_defaults=True)), timestamp(), conversation_id))
+            updated = db.execute(f"UPDATE conversations SET {', '.join(assignments)} WHERE id = ?", (*values, conversation_id))
             if updated.rowcount == 0:
                 raise HTTPException(404, "Conversation not found. Start a new conversation.")
         return self.get(conversation_id)
@@ -157,7 +186,7 @@ def register_conversations(app, connection):
         return Response(status_code=204)
 
     @app.patch("/api/conversations/{conversation_id}")
-    def update_filters(conversation_id: str, request: FilterUpdate):
-        return store.update_filters(conversation_id, request.filters)
+    def update_preferences(conversation_id: str, request: ConversationUpdate):
+        return store.update_preferences(conversation_id, filters=request.filters, mode=request.mode)
 
     return store

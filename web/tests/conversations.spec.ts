@@ -1,20 +1,21 @@
-﻿import {test,expect} from '@playwright/test';
+import {expandEvidence} from './evidence';
+import {test,expect} from '@playwright/test';
 import {execFileSync} from 'node:child_process';
 test.beforeAll(()=>{execFileSync('uv',['run','python','-m','magic_rag','sample'],{cwd:'..',env:{...process.env,MAGIC_RAG_DB:process.env.MAGIC_RAG_TEST_DB||'./test-results/browser.db'}});});
 test.beforeEach(async({request})=>{for(const chat of await(await request.get('/api/conversations')).json())await request.delete(`/api/conversations/${chat.id}`);});
 test('reopen ordered original evidence and delete saved conversations after reload',async({page})=>{
  await page.goto('/');
  await page.getByLabel('Your question').fill('Delver');await page.getByRole('button',{name:'Send',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
+ await expandEvidence(page);await expect(page.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
  await page.getByLabel('Your question').fill('Sol Ring');await page.getByRole('button',{name:'Send',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Sol Ring',exact:true})).toBeVisible();
+ await expandEvidence(page);await expect(page.getByRole('heading',{name:'Sol Ring',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'New chat',exact:true}).click();
  await page.getByLabel('Your question').fill('Lightning Bolt');await page.getByRole('button',{name:'Send',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
+ await expandEvidence(page);await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
  await page.reload();await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
  await expect(page.locator('.turn')).toHaveCount(2);
  const first=page.locator('.turn').first();await first.getByText('Retrieval details',{exact:true}).click();await expect(first.getByTestId('actual-query')).toHaveText('Delver');
  await page.getByRole('button',{name:'Delete conversation: Delver',exact:true}).click();
  await page.reload();await expect(page.getByRole('button',{name:'Open conversation: Delver',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Open conversation: Lightning Bolt',exact:true}).click();await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Open conversation: Lightning Bolt',exact:true}).click();await expandEvidence(page);await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
 });

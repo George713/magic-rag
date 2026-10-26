@@ -1,3 +1,4 @@
+import {expandEvidence} from './evidence';
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
@@ -18,7 +19,8 @@ test('answer text arrives incrementally and completed answers reopen', async ({p
  await expect(page.getByRole('button',{name:'Stop answer'})).toBeVisible();
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
  await expect(page.getByRole('button',{name:'Stop answer'})).not.toBeVisible();
- await expect(page.getByTestId('answer-citations').getByRole('link')).toHaveAttribute('href',/#turn-.*-card-sample-delver$/);
+ await expect(page.getByRole('navigation',{name:'Answer citations'})).toHaveCount(0);
+ await expandEvidence(page);await expect(page.locator('article[id$="-card-sample-delver"]')).toContainText('Flying');
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
@@ -37,7 +39,7 @@ test('Stop preserves incomplete output and reopening shows cancelled state', asy
  await expect(page.locator('.answer .heading')).toContainText('cancelled');
  await expect(page.getByTestId('generation-status')).toContainText('incomplete');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
- await expect(page.getByTestId('answer-citations')).not.toBeVisible();
+ await expect(page.getByRole('navigation',{name:'Answer citations'})).toHaveCount(0);
  await page.setViewportSize({width:390,height:844});
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
  await page.screenshot({path:'test-results/stopped-mobile.png',fullPage:true});
@@ -47,10 +49,10 @@ test('provider failure keeps partial output, source cards, and subsequent turns 
  await ask(page,'Delver fail');
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
  await expect(page.getByTestId('generation-status')).toContainText('failed');
- await expect(page.locator('article[id$="-card-sample-delver"]')).toContainText('Flying');
+ await expandEvidence(page);await expect(page.locator('article[id$="-card-sample-delver"]')).toContainText('Flying');
  await page.getByLabel('Your question').fill('Lightning Bolt');
  await page.getByRole('button',{name:'Send',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
+ await expandEvidence(page);await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
 });
 
 test('Stop aborts upstream even when cancel HTTP stalls and cannot overwrite a later turn', async ({page,request}) => {
@@ -76,7 +78,7 @@ test('Stop aborts upstream even when cancel HTTP stalls and cannot overwrite a l
   expect(cancelRequested).toBe(true);
    await page.getByLabel('Your question').fill('Lightning Bolt');
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
+  await expandEvidence(page);await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
   await boundedCancel;
   await expect(page.getByRole('alert')).not.toBeVisible();
   const latest=page.locator('.turn').last();await latest.getByText('Retrieval details',{exact:true}).click();

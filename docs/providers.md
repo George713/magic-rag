@@ -1,6 +1,6 @@
 # Remote card explanations
 
-Sending a message retrieves cards and requests a streamed answer from the exact selected evidence. Every citation links to that turn's complete card text. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
+Sending a message retrieves cards and requests a streamed answer from the exact selected evidence. Validated citations remain in the answer data; the interface exposes supporting card text through that turn's Retrieved evidence disclosure instead of a Sources line. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
 
 The browser now uses [streamed saved-turn answers and Stop](streaming.md). The synchronous search option described below remains available to API clients.
 
@@ -31,6 +31,6 @@ The UI's provider status comes from `GET /api/provider`. `POST /api/search` acce
 
 The answer JSON contract accepts optional `text`, `citations`, `insufficient_evidence`, and `assets` (a list of selected-evidence card IDs). Text-only, assets-only, and combined responses are supported. Usable text or at least one selected asset is required; supported prose still requires citations. Unknown fields, invented IDs, and model-supplied image URLs fail validation. The service resolves assets to the turn's saved card metadata only after successful completion; partial or cancelled streams do not publish validated assets. Source metadata may be absent on older saved turns, which remain readable. Validation does not establish the truth of prose or the availability of external images.
 
-`uv run pytest backend/tests/test_generation.py` exercises the FastAPI seam with isolated real SQLite and deterministic provider substitutes, including the actual HTTP adapter with a substituted external transport. Browser tests cover unavailable-provider evidence retention and citation navigation. These tests do not establish remote model quality or live Go support.
+`uv run pytest backend/tests/test_generation.py` exercises the FastAPI seam with isolated real SQLite and deterministic provider substitutes, including the actual HTTP adapter with a substituted external transport. Browser tests cover unavailable-provider evidence retention and access through the evidence disclosure. These tests do not establish remote model quality or live Go support.
 
 When workload approval and credentials are available, run a separate smoke check using a known card query, inspect the answer's citations and insufficient-evidence behavior, and record model, date, and outcome without the key. Until then, the live integration remains unverified.

@@ -72,7 +72,7 @@ Accepted during the 2026-10-25 through 2026-10-26 design interview. The user req
 Tracked in [specification #15: Conversational card chat with persistent filters and image assets](https://github.com/George713/magic-rag/issues/15).
 
 - Use a ChatGPT-style layout: previous conversations and New chat on the left, the conversation transcript and composer in the center, and filters on the right. Side panels can collapse on smaller screens.
-- Support card discovery, card explanations, and conversational follow-ups, with answers grounded in retrieved cards and clickable card references. Deck optimization and authoritative rules rulings remain deferred.
+- Support card discovery, card explanations, and conversational follow-ups, with answers grounded in retrieved cards. The card presentation refinement below supersedes the original requirement for visible citation and asset-reference links in answers. Deck optimization and authoritative rules rulings remain deferred.
 - Keep checkbox controls for filters and add a separate Legendary checkbox. Checked means only legendary cards are eligible; unchecked imposes no legendary restriction. Combine it with the other explicit filters and apply the selected filters to the next submitted message.
 - Sending a message automatically retrieves evidence and generates a streamed answer, with a Stop button.
 - Put the retrieval inspector in an expandable Retrieval details section beneath each answer; reserve the right sidebar for filters.
@@ -103,6 +103,29 @@ Checked 2026-10-25:
 - No Go embedding or dedicated reranking API was identified in the reviewed documentation; the accepted local components do not depend on these endpoints.
 - Scryfall live metadata and complete download now work with identifying headers. The current `oracle_cards` contract supplies `jsonl_download_uri` and `compressed_size` for gzip JSON Lines; canonical `oracle_id` identifies distinct cards. The verified download has 38,997 records. [Corpus import and provenance](corpus-import.md) records the current contract, canonical-field handling, complete-document windows, atomic activation, and smoke results.
 - Windows Python 3.11.4 successfully loads SQLite FTS5 and sqlite-vec 0.1.6. Real BGE and MiniLM CPU smoke checks pass, including document windows and explicit oversized-query errors. Compatibility identities include immutable revisions and window/aggregation policy. [Vector search](vector-search.md) and [reranking](reranking.md) record execution and verification details.
+
+## Accepted chat follow-up fixes
+
+Confirmed in the 2026-10-26 interview; tracked in [#23](https://github.com/George713/magic-rag/issues/23).
+
+- Each conversation immediately saves its current search mode, including unsent changes, and restores it on reopening and application restart. New conversations default to keyword search. Existing conversations inherit the latest saved turn's mode when the preference is introduced; historical modes remain attached to their original turns.
+- Each answer has a separate Retrieved evidence disclosure, closed by default alongside Retrieval details. Selected card assets stay visible beneath the answer. The card presentation refinement below supersedes the original answer citation and asset-reference links that opened the turn's evidence. No-match guidance remains visible without opening either disclosure.
+- Repair missing source imagery in the existing corpus and saved card assets/evidence, preserving selected card identities, historical text, ranks, filters, and generation content. Preserve existing image snapshots. Use source-provided representative-printing images, both faces where applicable, and the existing enlargement interaction.
+- The repair acquires presentation metadata separately from embedding/index preparation and applies missing metadata atomically. A failed acquisition or write preserves previous data. It does not change the active corpus identity or require rebuilding local-model indexes.
+
+## Accepted chat card presentation refinement
+
+Accepted in the 2026-10-26 grill-with-docs interview and carried into the requested specification stage. Browser testing and the missing-image fallback were confirmed during specification preparation. These decisions describe intended behavior, not completed implementation.
+
+Tracked in [specification #25: Simplify chat card rows and frameless image enlargement](https://github.com/George713/magic-rag/issues/25).
+
+- Remove the answer's Sources line and the additional linked card name above each card asset. Preserve answer text, Retrieved evidence, and Retrieval details, including their existing content and interactions.
+- Show all selected card images for an answer in one horizontal row, preserving the existing card and face order. Include both face images for double-faced cards in the same row. Use small gaps and readable thumbnail sizes, with horizontal scrolling when the row exceeds the available width, including on mobile. Center each image's name beneath it.
+- Wherever an image is enlarged, show the centered card image without an interface frame, border, or background. Keep the darkened backdrop and center the name beneath the image as floating text. Preserve source artwork and printed card borders; processing white pixels embedded in source imagery is outside this change.
+- Place a semi-transparent X over the enlarged card's top-right corner. Clicking anywhere, including the image, name, or backdrop, closes the enlarged view. Escape also closes it; closing restores keyboard focus to the thumbnail that opened it.
+- Apply the enlargement presentation consistently to answer assets and images inside Retrieved evidence. The single-row layout requirement applies to the answer's selected card assets.
+- Keep a plain, unlinked card name when a selected asset has no image metadata. Preserve readable image-load errors and access to evidence.
+- Verify at the existing Playwright chat browser seam with deterministic responses and realistically sized images. Cover desktop/mobile overflow, captions, both faces, saved chats, all closing interactions, and focus restoration; inspect screenshots for the transparent presentation and dark backdrop. Replace assertions requiring the removed links. No new backend testing seam is needed.
 
 ## Decision records
 

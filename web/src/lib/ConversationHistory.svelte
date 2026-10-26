@@ -5,6 +5,7 @@
  import type { Trace } from '$lib/types';
  export let conversationId: string | null = null;
  export let busy = false;
+ export let mode = 'keyword';
  export let onselect: (conversation: Conversation | null) => void;
  let conversations: ConversationSummary[] = [];
  export let loading = false;
@@ -17,11 +18,15 @@
  }
  async function refresh() {conversations=await call('');}
  function remember() {if (conversationId) localStorage.setItem('magic-rag-conversation',conversationId); else localStorage.removeItem('magic-rag-conversation');}
- async function create() {const current:Conversation=await call('','POST'); conversationId=current.id; remember(); await refresh(); return current;}
+ async function create() {let current:Conversation=await call('','POST'); conversationId=current.id; remember(); current=await call(`/${current.id}`,'PATCH',{mode}); await refresh(); return current;}
  export async function ensureConversation(): Promise<string> {return conversationId || (await create()).id;}
  export function persistFilters(filters: ExactFilters) {
-  const snapshot=structuredClone(filters);
-  pending=pending.catch(() => {}).then(async () => {const id=await ensureConversation(); await call(`/${id}`,'PATCH',{filters:snapshot});});
+  return persistPreferences({filters});
+ }
+ export function persistMode(mode: string) {return persistPreferences({mode});}
+ function persistPreferences(preferences: {filters?: ExactFilters; mode?: string}) {
+  const snapshot=structuredClone(preferences);
+  pending=pending.catch(() => {}).then(async () => {const id=await ensureConversation(); await call(`/${id}`,'PATCH',snapshot);});
   void pending.catch(e => {error=e.message;});
   return pending;
  }

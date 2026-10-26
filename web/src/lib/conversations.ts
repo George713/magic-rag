@@ -8,4 +8,4 @@ export interface SavedTurn {
 export interface ConversationSummary {
  id: string; title: string; created_at: string; updated_at: string;
 }
-export interface Conversation extends ConversationSummary { turns: SavedTurn[]; current_filters?: ExactFilters }
+export interface Conversation extends ConversationSummary { turns: SavedTurn[]; current_filters?: ExactFilters; current_mode: string }

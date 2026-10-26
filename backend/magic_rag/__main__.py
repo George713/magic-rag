@@ -4,7 +4,7 @@ import uvicorn
 from .app import create_app, default_db_path, connect
 from .ingest import ingest_sample
 from .vectors import BgeEmbedder
-from .corpus import import_corpus, LocalScryfallSource, ScryfallSource
+from .corpus import import_corpus, repair_images, LocalScryfallSource, ScryfallSource
 from .evaluation import write_report
 from pathlib import Path
 import anyio
@@ -20,7 +20,7 @@ async def benchmark_application(payload):
         return response.json()
 
 parser = argparse.ArgumentParser(description="Local Magic retrieval")
-parser.add_argument("command", choices=["serve", "sample", "sample-vectors", "import", "benchmark"])
+parser.add_argument("command", choices=["serve", "sample", "sample-vectors", "import", "repair-images", "benchmark"])
 parser.add_argument("--port", type=int, default=8000)
 parser.add_argument("--source", type=str, help="Existing Scryfall gzip JSONL export; otherwise discover and download current oracle_cards.")
 parser.add_argument("--output", default="reports/retrieval-benchmark.json", help="Benchmark JSON output; sibling Markdown report is also written.")
@@ -40,6 +40,12 @@ if args.command == "benchmark":
         print(json.dumps({"outputs":write_report(report, args.output), "corpus":report["corpus"], "aggregates":report["aggregates"]}))
     except Exception as exc:
         parser.exit(1, f"Benchmark failed: {getattr(exc, 'detail', str(exc))}\n")
+elif args.command == 'repair-images':
+    try:
+        result = repair_images(lambda: connect(default_db_path()), LocalScryfallSource(args.source) if args.source else ScryfallSource())
+        print(json.dumps(result))
+    except Exception as exc:
+        parser.exit(1, f'Image repair failed; previous data preserved. {exc}\n')
 elif args.command == "import":
     try:
         result = import_corpus(lambda: connect(default_db_path()), LocalScryfallSource(args.source) if args.source else ScryfallSource(), BgeEmbedder())

@@ -162,6 +162,55 @@ def import_corpus(connection, source, embedder):
     return {"status":"activated", "corpus_id":metadata["id"], "card_count":len(cards), "elapsed_ms":(perf_counter()-start)*1000}
 
 
+def repair_images(connection, source):
+    """Fill missing presentation metadata only; preserve canonical data and image snapshots."""
+    metadata, records = source.snapshot()
+    presentations = {}
+    for record in records:
+        card_id = record.get('oracle_id')
+        if not isinstance(card_id, str) or not card_id or not record.get('name'):
+            continue
+        images = source_images(record, record.get('card_faces') or [])
+        if images and card_id not in presentations:
+            presentations[card_id] = {'images': images, 'source_url': source_url(record.get('scryfall_uri'))}
+    if not presentations or not metadata.get('id'):
+        raise CorpusError('No usable source image metadata; existing data preserved.')
+
+    def fill(card):
+        presentation = presentations.get(card.get('card_id'))
+        if not presentation:
+            return False
+        changed = False
+        if not card.get('images'):
+            card['images'] = presentation['images']
+            changed = True
+        if not card.get('source_url') and presentation['source_url']:
+            card['source_url'] = presentation['source_url']
+            changed = True
+        return changed
+
+    repaired_cards = repaired_turns = 0
+    with connection() as db:
+        db.execute('BEGIN IMMEDIATE')
+        for row in db.execute('SELECT cards.card_id, card_images.images, card_images.source_url FROM cards LEFT JOIN card_images USING (card_id)').fetchall():
+            card = {'card_id': row['card_id'], 'images': json.loads(row['images']) if row['images'] else [], 'source_url': row['source_url']}
+            if fill(card):
+                db.execute('INSERT OR REPLACE INTO card_images VALUES (?, ?, ?)', (card['card_id'], json.dumps(card['images']), card['source_url']))
+                repaired_cards += 1
+        # The CLI can also run before conversations have ever been initialized.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conversation_turns'").fetchone():
+            for row in db.execute('SELECT id, trace FROM conversation_turns').fetchall():
+                trace = json.loads(row['trace'])
+                changed = False
+                for cards in [trace.get('selected_evidence', []), *trace.get('stages', {}).values(), trace.get('generation', {}).get('assets', [])]:
+                    for card in cards:
+                        changed = fill(card) or changed
+                if changed:
+                    db.execute('UPDATE conversation_turns SET trace = ? WHERE id = ?', (json.dumps(trace), row['id']))
+                    repaired_turns += 1
+    return {'status': 'repaired', 'source_id': metadata['id'], 'repaired_cards': repaired_cards, 'repaired_turns': repaired_turns}
+
+
 def register_corpus(app, connection, embedder, source=None):
     @app.get("/api/corpus")
     def active_corpus():
@@ -175,3 +224,10 @@ def register_corpus(app, connection, embedder, source=None):
             return import_corpus(connection, source or ScryfallSource(), embedder)
         except Exception as exc:
             raise HTTPException(422, f"Corpus import failed; previous corpus preserved. {exc}") from exc
+
+    @app.post('/api/corpus/repair-images')
+    def repair_card_images():
+        try:
+            return repair_images(connection, source or ScryfallSource())
+        except Exception as exc:
+            raise HTTPException(422, f'Image repair failed; previous data preserved. {exc}') from exc
