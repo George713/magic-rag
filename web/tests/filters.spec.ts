@@ -1,4 +1,5 @@
-﻿import { test, expect } from '@playwright/test';
+import {expandEvidence} from './evidence';
+import { test, expect } from '@playwright/test';
 
 test('filters constrain every turn without restoring historical controls, and clear without restarting', async ({page}) => {
  await page.goto('/');
@@ -10,7 +11,7 @@ test('filters constrain every turn without restoring historical controls, and cl
  await page.getByLabel('Your question').fill('Sol Ring Delver');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const first = page.locator('section.turn').nth(0);
- await first.locator('.retrieval-details > summary').click();
+ await first.locator('.retrieval-details > summary').click();await expandEvidence(first);
  await expect(first.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
  await expect(first.getByRole('heading',{name:'Sol Ring',exact:true})).toHaveCount(0);
  await expect(first.getByTestId('trace-filters')).toContainText('Blue');
@@ -19,7 +20,7 @@ test('filters constrain every turn without restoring historical controls, and cl
  await page.getByLabel('Your question').fill('Any cheaper ones');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const second = page.locator('section.turn').nth(1);
- await second.locator('.retrieval-details > summary').click();
+ await second.locator('.retrieval-details > summary').click();await expandEvidence(second);
  await expect(second.getByTestId('actual-query')).toHaveText('Any cheaper ones');
  await expect(controls.getByLabel('Blue',{exact:true})).toBeChecked();
  await expect(second.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
@@ -27,20 +28,20 @@ test('filters constrain every turn without restoring historical controls, and cl
  await page.getByLabel('Minimum mana value',{exact:true}).fill('2');
  await page.getByLabel('Maximum mana value',{exact:true}).fill('3');
  // Reopening old details must not restore their original controls.
- await first.locator('.retrieval-details > summary').click();
- await first.locator('.retrieval-details > summary').click();
+ await first.locator('.retrieval-details > summary').click();await expandEvidence(first);
+ await first.locator('.retrieval-details > summary').click();await expandEvidence(first);
  await expect(page.getByLabel('Maximum mana value',{exact:true})).toHaveValue('3');
  await page.getByLabel('Your question').fill('Delver');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const third = page.locator('section.turn').nth(2);
- await third.locator('.retrieval-details > summary').click();
+ await third.locator('.retrieval-details > summary').click();await expandEvidence(third);
  await expect(third.getByText('No matching cards',{exact:true})).toBeVisible();
  await controls.getByRole('button',{name:'Clear filters',exact:true}).click();
  await expect(page.getByTestId('active-filters')).toHaveText('Any cards');
  await page.getByLabel('Your question').fill('Sol Ring');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const fourth = page.locator('section.turn').nth(3);
- await fourth.locator('.retrieval-details > summary').click();
+ await fourth.locator('.retrieval-details > summary').click();await expandEvidence(fourth);
  await expect(fourth.getByRole('heading',{name:'Sol Ring',exact:true})).toBeVisible();
  await expect(fourth.getByTestId('trace-filters')).toHaveText('Any cards');
  await page.setViewportSize({width:390,height:844});
@@ -59,7 +60,7 @@ test('Legendary restricts the next message and clearing it preserves the other c
  await page.getByLabel('Your question').fill('Delver');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const first = page.locator('section.turn').nth(0);
- await first.locator('.retrieval-details > summary').click();
+ await first.locator('.retrieval-details > summary').click();await expandEvidence(first);
  await expect(first.getByTestId('trace-filters')).toContainText('Legendary only');
  await expect(first.getByText('No matching cards',{exact:true})).toBeVisible();
  await controls.getByLabel('Legendary',{exact:true}).uncheck();
@@ -67,7 +68,7 @@ test('Legendary restricts the next message and clearing it preserves the other c
  await page.getByLabel('Your question').fill('Delver');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const second = page.locator('section.turn').nth(1);
- await second.locator('.retrieval-details > summary').click();
+ await second.locator('.retrieval-details > summary').click();await expandEvidence(second);
  await expect(second.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
  await expect(second.getByTestId('trace-filters')).not.toContainText('Legendary');
  await expect(first.getByTestId('trace-filters')).toContainText('Legendary only');

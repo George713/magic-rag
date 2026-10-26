@@ -20,8 +20,12 @@
  async function create() {const current:Conversation=await call('','POST'); conversationId=current.id; remember(); await refresh(); return current;}
  export async function ensureConversation(): Promise<string> {return conversationId || (await create()).id;}
  export function persistFilters(filters: ExactFilters) {
-  const snapshot=structuredClone(filters);
-  pending=pending.catch(() => {}).then(async () => {const id=await ensureConversation(); await call(`/${id}`,'PATCH',{filters:snapshot});});
+  return persistPreferences({filters});
+ }
+ export function persistMode(mode: string) {return persistPreferences({mode});}
+ function persistPreferences(preferences: {filters?: ExactFilters; mode?: string}) {
+  const snapshot=structuredClone(preferences);
+  pending=pending.catch(() => {}).then(async () => {const id=await ensureConversation(); await call(`/${id}`,'PATCH',snapshot);});
   void pending.catch(e => {error=e.message;});
   return pending;
  }

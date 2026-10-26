@@ -6,6 +6,30 @@ The workspace uses a dark transcript between chat history and exact filters. Sen
 
 Answers can contain text, selected card assets, or both. The model selects evidence card identities; the service resolves source imagery. It never accepts model-invented image URLs. Source-backed face images enlarge in a centered dialog. Legacy turns and unavailable images retain readable card evidence.
 
+## Search modes, collapsed evidence, and legacy images
+
+Follow-up [#23](https://github.com/George713/magic-rag/issues/23) adds a persisted current search mode alongside each conversation's current filters. The mode saves immediately, including unsent changes, through the same serialized preference-save queue. Switching chats waits for queued writes. New chats default to keyword; existing chats migrate from their latest turn's mode. Opening historical details never changes the current mode.
+
+Retrieved evidence and Retrieval details are separate disclosures, both initially closed. Selected card assets remain visible beneath the answer. Citation, asset-name, and inspector links reveal the matching evidence before fragment navigation. No-match guidance remains visible outside the disclosure.
+
+The installed legacy corpus had 38,997 cards but no `card_images` rows. The latest completed answer had four selected card assets with empty image snapshots. This is a missing-metadata migration issue: current imports already retain imagery, but introducing the image table did not populate older corpora or saved turns. Deterministic browser fixtures had supplied image metadata and therefore did not expose the upgrade problem.
+
+Run the explicit repair from the repository root:
+
+```powershell
+uv run python -m magic_rag repair-images
+# Or reuse a downloaded Scryfall gzip JSONL export:
+uv run python -m magic_rag repair-images --source path/to/oracle-cards.jsonl.gz
+```
+
+`POST /api/corpus/repair-images` provides the same operation at the backend API. Download and source-image extraction complete before an atomic transaction fills missing images/source links for active cards and saved evidence/assets, matched by canonical card identity. Existing image snapshots stay unchanged. Cards present only in saved history can also be repaired. Cards absent from the supplied source keep their readable evidence. No embedding model is loaded, and canonical text, FTS/vector indexes, corpus identity, answer content, and selected card identities are preserved. Failure rolls back the repair; rerunning it is safe. Repair is explicit and never triggers a startup download.
+
+The local database was backed up to `data/cards-before-image-repair.db` and repaired on 2026-10-26: all 38,997 cards now have image metadata and all four assets in the latest saved answer have imagery. Comparison with the backup verified unchanged canonical card data, FTS and vector contents, corpus identity, and saved traces excluding presentation fields. A restored image URL returned HTTP 200 with JPEG content.
+
+Verification for this follow-up: backend tests cover unsent mode preferences, restart independence, historical snapshots, legacy-mode migration, metadata repair of saved selections and future searches, repeat repair, unsafe URLs, download failure, and transaction rollback. Browser tests cover per-chat mode navigation/reload, independent historical details, collapsed evidence, correct-turn citation expansion/scrolling, visible assets, both faces, enlargement, reopening, and image-load failure.
+
+Follow-up results: **192 backend tests passed, 2 optional real-model tests skipped; 22 browser tests passed** across the standard, workspace, chat, streaming, filters, rewriting, vector, hybrid, and reranking configurations. `npm run check` reports zero errors/warnings and `npm run build` passes. The checks use deterministic answer providers; the live-provider boundary described below is unchanged.
+
 ## Verification boundaries
 
 FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source, and provider substitutes. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks do not establish live OpenCode Go support. Workload suitability and credentials remain unresolved; no live model request or paid fallback is used.

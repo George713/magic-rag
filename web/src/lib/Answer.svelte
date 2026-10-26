@@ -1,6 +1,7 @@
 <script lang="ts">
  import type {Generation} from '$lib/types';
  import CardImages from '$lib/CardImages.svelte';
+ import {revealEvidence} from '$lib/evidence';
  let {generation,prefix=''}:{generation:Generation;prefix?:string}=$props();
  let copied=$state(false);let copyError=$state('');
  async function copy(){try{await navigator.clipboard.writeText(generation.text||'');copied=true;copyError='';}catch{copyError='The answer could not be copied. Select its text to copy it.';}}
@@ -10,10 +11,10 @@
  {#if generation.text}
   {#if generation.insufficient_evidence}<p class="insufficient">The selected evidence is insufficient to establish an answer.</p>{/if}
   <p class="text" data-testid="answer-text">{generation.text}</p>
-  {#if generation.status==='completed' && generation.citations?.length}<nav aria-label="Answer citations" data-testid="answer-citations"><span>Sources</span>{#each generation.citations as citation}<a href={`#${prefix}-card-${citation.card_id}`}>{citation.name} ↗</a>{/each}</nav>{/if}
+  {#if generation.status==='completed' && generation.citations?.length}<nav aria-label="Answer citations" data-testid="answer-citations"><span>Sources</span>{#each generation.citations as citation}<a href={`#${prefix}-card-${citation.card_id}`} onclick={revealEvidence}>{citation.name} ↗</a>{/each}</nav>{/if}
   <button class="copy" onclick={copy}>{copied?'Copied':'Copy answer'}</button>{#if copyError}<p role="alert">{copyError}</p>{/if}
  {/if}
- {#if generation.status==='completed' && generation.assets?.length}<section class="assets" aria-label="Card assets">{#each generation.assets as card}<div><a href={`#${prefix}-card-${card.card_id}`}>{card.name}</a><CardImages {card}/></div>{/each}</section>{/if}
+ {#if generation.status==='completed' && generation.assets?.length}<section class="assets" aria-label="Card assets">{#each generation.assets as card}<div><a href={`#${prefix}-card-${card.card_id}`} onclick={revealEvidence}>{card.name}</a><CardImages {card}/></div>{/each}</section>{/if}
  {#if generation.status!=='completed'}<p class="status" data-testid="generation-status" role={generation.status==='failed'?'alert':'status'}>{generation.message}</p>{/if}
 </section>
 <style>

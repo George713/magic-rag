@@ -106,8 +106,9 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         filters = request.filters
         if conversation is not None and "filters" not in request.model_fields_set:
             filters = ExactFilters.model_validate(conversation["current_filters"])
+        mode = conversation['current_mode'] if conversation is not None and 'mode' not in request.model_fields_set else request.mode
         start = perf_counter()
-        if request.mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
+        if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
             raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
         tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
         if not tokens:
@@ -124,7 +125,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         with connect(path) as db:
             db.execute("BEGIN")
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            branches = ("keyword", "vector") if request.mode in ("hybrid", "hybrid_rerank") else (request.mode,)
+            branches = ("keyword", "vector") if mode in ("hybrid", "hybrid_rerank") else (mode,)
             for branch in branches:
                 stage_start = perf_counter()
                 try:
@@ -145,12 +146,12 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                     card["rank"] = rank
                     stages[branch].append(card)
                 timings[branch] = (perf_counter() - stage_start) * 1000
-        if request.mode in ("hybrid", "hybrid_rerank"):
+        if mode in ("hybrid", "hybrid_rerank"):
             fusion_start = perf_counter()
             stages["fused"] = fuse(stages, request.settings.rrf_constant, query=query)
             timings["fusion"] = (perf_counter() - fusion_start) * 1000
-        candidates = stages["fused" if request.mode in ("hybrid", "hybrid_rerank") else request.mode]
-        if request.mode == "hybrid_rerank":
+        candidates = stages["fused" if mode in ("hybrid", "hybrid_rerank") else mode]
+        if mode == "hybrid_rerank":
             rerank_start = perf_counter()
             try:
                 stages["reranked"] = rerank(query, candidates[:request.settings.rerank_candidates], reranking_model)
@@ -159,8 +160,8 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
             candidates = stages["reranked"]
             timings["reranking"] = (perf_counter() - rerank_start) * 1000
         trace = {"trace_id": trace_id, "question": request.question, "query": query,
-                "mode": request.mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
-                "models": {**({"embedding": embedding_model.config} if request.mode != "keyword" else {}), **({"reranker":reranking_model.config} if request.mode == "hybrid_rerank" else {})},
+                "mode": mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
+                "models": {**({"embedding": embedding_model.config} if mode != "keyword" else {}), **({"reranker":reranking_model.config} if mode == "hybrid_rerank" else {})},
                 "settings": {**request.settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
                 "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
                 "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
@@ -168,8 +169,10 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 "answer_context":answer_context,
                 "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
-            if "filters" in request.model_fields_set:
-                conversations.update_filters(request.conversation_id, filters)
+            if {"filters", "mode"} & request.model_fields_set:
+                conversations.update_preferences(request.conversation_id,
+                    filters=filters if "filters" in request.model_fields_set else None,
+                    mode=mode if "mode" in request.model_fields_set else None)
             conversations.append_trace(request.conversation_id, trace)
         return trace
 

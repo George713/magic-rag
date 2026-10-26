@@ -149,3 +149,53 @@ def test_search_uses_current_filters_without_restoring_old_turn_snapshot(tmp_pat
         assert second["selected_evidence"] == []
         saved = client.get(f"/api/conversations/{conversation_id}").json()
         assert saved["turns"][0]["trace"]["filters"] == first["filters"] == {"colors": ["U"]}
+
+
+def test_search_mode_persists_unsent_edits_independently_and_preserves_history(tmp_path):
+    from magic_rag.ingest import ingest_sample
+    from test_vectors import ControlledEmbedder
+    from test_reranking import ControlledReranker
+    path = tmp_path / "modes.db"
+    ingest_sample(path, embedder=ControlledEmbedder())
+    with TestClient(create_app(path, embedder=ControlledEmbedder())) as client:
+        first = client.post('/api/conversations').json()
+        second = client.post('/api/conversations').json()
+        assert first['current_mode'] == second['current_mode'] == 'keyword'
+        original = client.post('/api/search', json={'question': 'Delver', 'conversation_id': first['id']}).json()
+        for mode in ('keyword', 'vector', 'hybrid', 'hybrid_rerank'):
+            response = client.patch(f"/api/conversations/{first['id']}", json={'mode': mode})
+            assert response.status_code == 200
+            assert response.json()['current_mode'] == mode
+        client.patch(f"/api/conversations/{first['id']}", json={'filters': {'legendary': True}}).raise_for_status()
+        assert client.patch(f"/api/conversations/{first['id']}", json={'mode': 'unknown'}).status_code == 422
+        assert client.patch(f"/api/conversations/{first['id']}", json={}).status_code == 422
+        assert client.patch(f"/api/conversations/{first['id']}", json={'mode': None}).status_code == 422
+        assert client.patch('/api/conversations/missing', json={'mode': 'vector'}).status_code == 404
+    with TestClient(create_app(path, embedder=ControlledEmbedder(), reranker=ControlledReranker())) as restarted:
+        saved = restarted.get(f"/api/conversations/{first['id']}").json()
+        assert saved['current_mode'] == 'hybrid_rerank'
+        assert saved['current_filters'] == {'legendary': True}
+        assert saved['turns'][0]['trace'] == original
+        assert restarted.get(f"/api/conversations/{second['id']}").json()['current_mode'] == 'keyword'
+        # Omitted mode inherits the preference; explicit mode updates it.
+        inherited = restarted.post('/api/search', json={'question': 'Delver', 'conversation_id': first['id']}).json()
+        assert inherited['mode'] == 'hybrid_rerank'
+        restarted.post('/api/search', json={'question': 'Delver', 'conversation_id': first['id'], 'mode': 'keyword'}).raise_for_status()
+        assert restarted.get(f"/api/conversations/{first['id']}").json()['current_mode'] == 'keyword'
+
+
+def test_existing_chat_inherits_latest_search_mode_without_rewriting_turns(tmp_path):
+    import json
+    import sqlite3
+    path = tmp_path / 'legacy-mode.db'
+    with TestClient(create_app(path)) as client:
+        chat = client.post('/api/conversations').json()['id']
+        trace = client.post('/api/search', json={'question': 'Legacy', 'conversation_id': chat}).json()
+    trace['mode'] = 'hybrid'
+    with sqlite3.connect(path) as db:
+        db.execute('ALTER TABLE conversations DROP COLUMN current_mode')
+        db.execute('UPDATE conversation_turns SET trace = ?', (json.dumps(trace),))
+    with TestClient(create_app(path)) as restarted:
+        saved = restarted.get(f'/api/conversations/{chat}').json()
+        assert saved['current_mode'] == 'hybrid'
+        assert saved['turns'][0]['trace'] == trace

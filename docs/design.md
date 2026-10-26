@@ -104,6 +104,15 @@ Checked 2026-10-25:
 - Scryfall live metadata and complete download now work with identifying headers. The current `oracle_cards` contract supplies `jsonl_download_uri` and `compressed_size` for gzip JSON Lines; canonical `oracle_id` identifies distinct cards. The verified download has 38,997 records. [Corpus import and provenance](corpus-import.md) records the current contract, canonical-field handling, complete-document windows, atomic activation, and smoke results.
 - Windows Python 3.11.4 successfully loads SQLite FTS5 and sqlite-vec 0.1.6. Real BGE and MiniLM CPU smoke checks pass, including document windows and explicit oversized-query errors. Compatibility identities include immutable revisions and window/aggregation policy. [Vector search](vector-search.md) and [reranking](reranking.md) record execution and verification details.
 
+## Accepted chat follow-up fixes
+
+Confirmed in the 2026-10-26 interview; tracked in [#23](https://github.com/George713/magic-rag/issues/23).
+
+- Each conversation immediately saves its current search mode, including unsent changes, and restores it on reopening and application restart. New conversations default to keyword search. Existing conversations inherit the latest saved turn's mode when the preference is introduced; historical modes remain attached to their original turns.
+- Each answer has a separate Retrieved evidence disclosure, closed by default alongside Retrieval details. Selected card assets stay visible beneath the answer. Citation and asset-reference links open and scroll to the correct turn's evidence. No-match guidance remains visible without opening either disclosure.
+- Repair missing source imagery in the existing corpus and saved card assets/evidence, preserving selected card identities, historical text, ranks, filters, and generation content. Preserve existing image snapshots. Use source-provided representative-printing images, both faces where applicable, and the existing enlargement interaction.
+- The repair acquires presentation metadata separately from embedding/index preparation and applies missing metadata atomically. A failed acquisition or write preserves previous data. It does not change the active corpus identity or require rebuilding local-model indexes.
+
 ## Decision records
 
 Record accepted terminology in the root glossary as it is resolved. Create ADRs only for accepted architectural decisions with meaningful trade-offs and meaningful reversal costs.
