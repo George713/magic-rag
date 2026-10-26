@@ -13,6 +13,8 @@ class BrowserProvider:
 
     async def stream_answer(self, question, evidence, session_id, *, context=None):
         assets = [evidence[0]["card_id"]] if "assets" in question else []
+        if "multiple assets" in question:
+            assets = sorted(card["card_id"] for card in evidence)
         text = "" if "assets only" in question else "The transformed face has flying."
         if text:
             yield {"delta": "The transformed "}

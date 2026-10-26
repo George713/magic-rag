@@ -10,7 +10,7 @@ Answers can contain text, selected card assets, or both. The model selects evide
 
 Follow-up [#23](https://github.com/George713/magic-rag/issues/23) adds a persisted current search mode alongside each conversation's current filters. The mode saves immediately, including unsent changes, through the same serialized preference-save queue. Switching chats waits for queued writes. New chats default to keyword; existing chats migrate from their latest turn's mode. Opening historical details never changes the current mode.
 
-Retrieved evidence and Retrieval details are separate disclosures, both initially closed. Selected card assets remain visible beneath the answer. Citation, asset-name, and inspector links reveal the matching evidence before fragment navigation. No-match guidance remains visible outside the disclosure.
+Retrieved evidence and Retrieval details are separate disclosures, both initially closed. Selected card assets remain visible beneath the answer. Inspector links reveal the matching evidence before fragment navigation. The answer citation and asset-name links originally added here are removed by specification #25 below. No-match guidance remains visible outside the disclosure.
 
 The installed legacy corpus had 38,997 cards but no `card_images` rows. The latest completed answer had four selected card assets with empty image snapshots. This is a missing-metadata migration issue: current imports already retain imagery, but introducing the image table did not populate older corpora or saved turns. Deterministic browser fixtures had supplied image metadata and therefore did not expose the upgrade problem.
 
@@ -29,6 +29,33 @@ The local database was backed up to `data/cards-before-image-repair.db` and repa
 Verification for this follow-up: backend tests cover unsent mode preferences, restart independence, historical snapshots, legacy-mode migration, metadata repair of saved selections and future searches, repeat repair, unsafe URLs, download failure, and transaction rollback. Browser tests cover per-chat mode navigation/reload, independent historical details, collapsed evidence, correct-turn citation expansion/scrolling, visible assets, both faces, enlargement, reopening, and image-load failure.
 
 Follow-up results: **192 backend tests passed, 2 optional real-model tests skipped; 22 browser tests passed** across the standard, workspace, chat, streaming, filters, rewriting, vector, hybrid, and reranking configurations. `npm run check` reports zero errors/warnings and `npm run build` passes. The checks use deterministic answer providers; the live-provider boundary described below is unchanged.
+
+## Card rows and frameless enlargement
+
+Specification [#25](https://github.com/George713/magic-rag/issues/25), tickets [#26](https://github.com/George713/magic-rag/issues/26) and [#27](https://github.com/George713/magic-rag/issues/27). Review baseline: `6779cbd62d4dab5c3dfe424ef00c92103db94af4`.
+
+Answers omit the Sources navigation and duplicate linked names above selected images. All selected images, including both faces, appear in one row with 16px gaps, 210px thumbnails, and centered image-name captions. Horizontal scrolling stays inside the row. Focusing a thumbnail scrolls it fully into view for keyboard browsing. Assets without imagery retain a plain card name; image failures keep readable errors. Saved chats adopt the presentation without a data migration. Evidence and retrieval disclosures retain their content and default collapsed state.
+
+The shared enlarged view uses a transparent, frameless modal over the darkened page. The centered name floats below the source image; a semi-transparent X overlays its top-right corner. Clicking any part of the view or pressing Escape closes it and restores focus to its originating thumbnail. The same viewer serves answer assets and Retrieved evidence. Source pixels and printed borders are preserved.
+
+### Verification for specification #25
+
+The existing deterministic browser chat seam covers the complete UI/service flow. No live provider request or corpus modification was made. The external image fixture is an illustrated 488 by 680 SVG with transparent corners; it supplies representative proportions and contrast rather than real card artwork.
+
+| Acceptance case | Verification |
+| --- | --- |
+| Removed Sources and linked headings; preserved response forms and Copy | Chat tests for automatic streaming/copy/follow-ups and assets-only/combined responses |
+| One ordered row, both faces, gaps, centered captions | Multi-card desktop/mobile row test with image/caption geometry assertions |
+| Readable thumbnails and contained overflow | 1100px and 390px viewport checks; no horizontal page overflow; keyboard reveals the complete later thumbnail; emulated mobile touch swipe scrolls the row |
+| Single image without unnecessary scrolling | Ordinary source image/legacy asset browser test |
+| Frameless transparent enlargement and retained backdrop | Viewer tests at 1440px and 390px; screenshots inspected for image/caption/control placement and darkening |
+| X, image, caption, backdrop, Escape, keyboard close, focus return | Viewer dismissal tests for answers and evidence; immediate image-click test; repeated face opening |
+| Preserved evidence/details and history | Closed disclosure checks, per-turn evidence access, saved answer reload and both-face reopening |
+| Missing or failed images | Legacy plain-name fallback and unavailable-image scenarios with readable evidence |
+
+Results on Windows, 2026-10-26: **11 chat/viewer browser tests passed; 4 streaming browser tests passed; 192 backend tests passed, 2 optional real-model tests skipped; frontend checks reported zero errors/warnings; production build passed**. Backend tests use a workspace-local temporary directory because the sandbox restricts the default OS pytest temp directory. Run `.venv/Scripts/python.exe -m pytest --basetemp .scratch/implementation/spec-25/pytest` from the repository root, and from `web` run `npx playwright test --config playwright.chat.config.ts`, `npx playwright test --config playwright.streaming.config.ts`, `npm run check`, and `npm run build`.
+
+Visual evidence uses deterministic fixture imagery: [desktop row](images/spec-25/row-desktop.png), [mobile row after swipe](images/spec-25/row-mobile.png), [desktop viewer](images/spec-25/viewer-desktop.png), and [mobile viewer](images/spec-25/viewer-mobile.png). Row screenshots show a browsed position, including intentionally clipped neighboring cards. The older verification sections below describe their original implementation checkpoints; visible citation/asset-name links were superseded by #25.
 
 ## Verification boundaries
 

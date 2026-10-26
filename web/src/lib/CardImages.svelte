@@ -1,6 +1,6 @@
 <script lang="ts">
  import type { Card } from '$lib/types';
- let { card }: {card: Card} = $props();
+ let { card, row = false }: {card: Card; row?: boolean} = $props();
  let dialog = $state<HTMLDialogElement>();
  let selected = $state<{name:string; url:string} | null>(null);
  let failed = $state<string[]>([]);
@@ -17,13 +17,13 @@
 </script>
 
 {#if card.images?.length}
- <div class="card-images" aria-label={`${card.name} images`}>
+ <div class="card-images" class:row aria-label={`${card.name} images`}>
   {#each card.images as image (image.url)}
    <figure>
     {#if failed.includes(image.url)}
      <p class="unavailable">Image unavailable: {image.name}</p>
     {:else}
-     <button type="button" class="preview" aria-label={`Enlarge ${image.name}`} onclick={(event) => enlarge(image, event.currentTarget)}>
+     <button type="button" class="preview" aria-label={`Enlarge ${image.name}`} onfocus={(event) => {if (row) event.currentTarget.scrollIntoView({block:'nearest',inline:'nearest'});}} onclick={(event) => enlarge(image, event.currentTarget)}>
       <img src={image.url} alt={image.name} loading="lazy" onerror={() => failed = [...failed, image.url]} />
      </button>
     {/if}
@@ -47,7 +47,10 @@
 <style>
  .card-images{display:flex;flex-wrap:wrap;gap:16px;margin:18px 0;max-width:100%}
  figure{margin:0;min-width:0;max-width:min(210px,100%);flex:0 1 210px}
- .preview{display:block;padding:0;background:transparent;border:0;border-radius:10px;cursor:zoom-in;max-width:100%}
+ .row{display:contents}
+ .row figure{flex:0 0 210px;max-width:none}
+ .row figcaption{text-align:center}
+ .preview{display:block;padding:0;background:transparent;border:0;border-radius:10px;cursor:zoom-in;max-width:100%;scroll-margin:6px}
  .preview img{display:block;width:100%;height:auto;border-radius:10px}
  figcaption,.unavailable{font:12px/1.5 'Segoe UI',sans-serif;color:#a5b5ab;overflow-wrap:anywhere;margin:8px 0 0}
  dialog{color:#e9eee9;background:transparent;border:0;padding:20px;margin:0;width:100vw;height:100dvh;max-width:100vw;max-height:100dvh;cursor:zoom-out}
