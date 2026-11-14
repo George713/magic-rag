@@ -44,7 +44,7 @@ Both local models are replaceable baselines. The [benchmark](docs/evaluation.md)
 
 The corpus uses current canonical English information for distinct cards, collapsing repeated printings and retaining all faces. Scryfall's compressed JSONL export contract is verified. [Manual imports](docs/corpus-import.md) prepare embeddings and indexes before atomically activating a replacement corpus. Token-budgeted windows preserve long card documents without silently dropping abilities.
 
-Answer generation uses a configurable server-side provider adapter, verified with deterministic provider and HTTP-transport tests. OpenCode Go is preferred, but [its documented coding-agent workload](https://opencode.ai/v2/docs/console/go/) leaves suitability for this application unresolved. No live-provider smoke test has run and no paid alternative is selected. Requests require explicit workload confirmation and credentials. Retrieval, saved evidence, and the inspector work without a remote provider.
+Answer generation runs through LangChain's OpenAI-compatible chat model, configured server-side and tested with a deterministic scripted chat model. OpenCode Go is preferred, but [its documented coding-agent workload](https://opencode.ai/v2/docs/console/go/) leaves suitability for this application unresolved; the maintainer confirms it locally. A live cited answer is recorded in the [provider guide](docs/providers.md). No paid alternative is selected. Requests require explicit workload confirmation and credentials. Retrieval, saved evidence, and the inspector work without a remote provider.
 
 Card data, model downloads, local databases, and credentials are kept outside Git. This repository contains project materials, not a bundled card dataset.
 

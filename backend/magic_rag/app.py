@@ -10,7 +10,7 @@ from anyio import from_thread
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from magic_rag.providers import generate_answer, provider_status, provider_from_env
+from magic_rag.providers import ChatModelProvider, generate_answer, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
 from .retrieval import exact_name_match, fuse
 from .conversations import register_conversations
@@ -71,8 +71,9 @@ class SearchRequest(BaseModel):
     filters: ExactFilters = Field(default_factory=ExactFilters)
 
 
-def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None, corpus_source=None) -> FastAPI:
-    provider = provider if provider is not None else provider_from_env()
+def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, chat_model=None, corpus_source=None) -> FastAPI:
+    # The chat model is the only model substitution point; without one, the server configuration decides.
+    provider = ChatModelProvider(chat_model) if chat_model is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path) as db:
         # A refresh can commit while an in-flight search retains its read snapshot.

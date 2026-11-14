@@ -1,26 +1,19 @@
 """Remote answer generation boundary; retrieval evidence stays owned by the service."""
-from pydantic import BaseModel, ConfigDict, Field
-from dataclasses import dataclass, field
+from contextlib import aclosing
+from dataclasses import dataclass
 import json
 import os
 import re
 from urllib.parse import urlparse
 
-import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @dataclass(frozen=True)
 class UnavailableProvider:
     status: str
     message: str
-
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    url: str
-    model: str
-    api_key: str = field(repr=False)
-    suitability_confirmed: bool = False
 
 
 SYSTEM_PROMPT = """Explain Magic cards using only the supplied selected card evidence.
@@ -44,84 +37,73 @@ Do not extract or change structured filters. Explicit filter controls are applie
 For a self-contained question, preserve its meaning. Return only JSON: {"query": "standalone search query"}."""
 
 
-class ChatCompletionsProvider:
-    """Configured compatible API, without a default provider or model selection."""
+USER_AGENT = "magic-rag/0.1"
+ANSWER_OUTPUT_LIMIT = 200000
+JSON_OBJECT = {"type": "json_object"}
 
-    def __init__(self, config: ProviderConfig, *, transport=None):
-        self.config = config
-        self.transport = transport
 
-    def request_headers(self, session_id):
-        if not self.config.suitability_confirmed:
-            raise RuntimeError("Provider workload suitability has not been confirmed")
-        return {"Authorization":f"Bearer {self.config.api_key}", "User-Agent":"magic-rag/0.1", "x-opencode-session":session_id}
+class ChatModelProvider:
+    """Answer generation and follow-up rewriting through one LangChain chat model.
 
-    def request_payload(self, prompt, source, *, stream=False):
-        payload = {"model":self.config.model, "messages":[{"role":"system","content":prompt},
-                   {"role":"user","content":json.dumps(source)}], "response_format":{"type":"json_object"}}
-        if stream:
-            payload["stream"] = True
-        return payload
+    Production builds an OpenAI-compatible `ChatOpenAI` from the server configuration; tests
+    supply a deterministic chat model. The conversation ID travels with every request as the
+    OpenCode Go session header, so the provider can route one conversation consistently.
+    """
 
-    def answer_source(self, question, evidence, context):
+    def __init__(self, chat_model):
+        self.chat_model = chat_model
+
+    def request_options(self, session_id):
+        return {"response_format": JSON_OBJECT, "extra_headers": {"x-opencode-session": session_id}}
+
+    @staticmethod
+    def messages(prompt, source):
+        return [SystemMessage(prompt), HumanMessage(json.dumps(source))]
+
+    @staticmethod
+    def answer_source(question, evidence, context):
         context = context or {"retrieval_query":question, "conversation_context":[]}
         return {"question":question, **context,
                 "selected_evidence":[{"card_id":card["card_id"],"name":card["name"],"text":card["text"]} for card in evidence]}
 
+    @staticmethod
+    def completed_content(message):
+        finish_reason = (message.response_metadata or {}).get("finish_reason")
+        if finish_reason != "stop":
+            raise ValueError("Provider did not complete the answer")
+        if not isinstance(message.content, str):
+            raise ValueError("Provider returned non-text content")
+        return json.loads(message.content)
+
     async def rewrite(self, question, history, session_id):
-        headers = self.request_headers(session_id)
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10), transport=self.transport, follow_redirects=False) as client:
-            response = await client.post(self.config.url,
-                headers=headers, json=self.request_payload(REWRITE_PROMPT,{"question":question,"history":history}))
-            response.raise_for_status()
-            return json.loads(response.json()["choices"][0]["message"]["content"])
+        message = await self.chat_model.ainvoke(self.messages(REWRITE_PROMPT, {"question":question, "history":history}),
+                                                **self.request_options(session_id))
+        return self.completed_content(message)
 
     def answer(self, question, evidence, session_id, *, context=None):
-        headers = self.request_headers(session_id)
-        with httpx.Client(timeout=httpx.Timeout(60, connect=10), transport=self.transport, follow_redirects=False) as client:
-            response = client.post(self.config.url,
-                headers=headers, json=self.request_payload(SYSTEM_PROMPT,self.answer_source(question,evidence,context)))
-            response.raise_for_status()
-            return json.loads(response.json()["choices"][0]["message"]["content"])
+        message = self.chat_model.invoke(self.messages(SYSTEM_PROMPT, self.answer_source(question, evidence, context)),
+                                         **self.request_options(session_id))
+        return self.completed_content(message)
 
     async def stream_answer(self, question, evidence, session_id, *, context=None):
-        headers = self.request_headers(session_id)
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), transport=self.transport, follow_redirects=False) as client:
-            async with client.stream("POST", self.config.url,
-                headers=headers, json=self.request_payload(SYSTEM_PROMPT + " Put the text property first.",self.answer_source(question,evidence,context),stream=True)) as response:
-                response.raise_for_status()
-                content = ""
-                displayed = ""
-                finished = False
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        if not finished:
-                            raise ValueError("Stream ended before successful completion")
-                        yield {"result": json.loads(content)}
-                        return
-                    chunk = json.loads(data)
-                    choices = chunk.get("choices", [])
-                    if not choices:
-                        continue
-                    choice = choices[0]
-                    if choice.get("finish_reason"):
-                        if choice["finish_reason"] != "stop":
-                            raise ValueError("Provider did not complete the answer")
-                        finished = True
-                    fragment = choice.get("delta", {}).get("content") or ""
-                    content += fragment
-                    if len(content) > 200000:
-                        raise ValueError("Answer exceeds the supported output limit")
-                    text = partial_answer_text(content)
-                    if not text.startswith(displayed):
-                        raise ValueError("Provider changed previously streamed text")
-                    if len(text) > len(displayed):
-                        yield {"delta": text[len(displayed):]}
-                        displayed = text
-                raise ValueError("Provider stream disconnected before completion")
+        messages = self.messages(SYSTEM_PROMPT + " Put the text property first.", self.answer_source(question, evidence, context))
+        message = None
+        displayed = ""
+        async with aclosing(self.chat_model.astream(messages, **self.request_options(session_id))) as chunks:
+            async for chunk in chunks:
+                message = chunk if message is None else message + chunk
+                content = message.content if isinstance(message.content, str) else ""
+                if len(content) > ANSWER_OUTPUT_LIMIT:
+                    raise ValueError("Answer exceeds the supported output limit")
+                text = partial_answer_text(content)
+                if not text.startswith(displayed):
+                    raise ValueError("Provider changed previously streamed text")
+                if len(text) > len(displayed):
+                    yield {"delta": text[len(displayed):]}
+                    displayed = text
+        if message is None:
+            raise ValueError("Provider stream ended before any output")
+        yield {"result": self.completed_content(message)}
 
 
 def partial_answer_text(content):
@@ -166,7 +148,21 @@ def provider_from_env():
     parsed = urlparse(url)
     if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname or not (parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"})):
         return UnavailableProvider("invalid_configuration", "Use an HTTPS chat-completions endpoint (HTTP is allowed only on loopback). Keep credentials in the API key setting.")
-    return ChatCompletionsProvider(ProviderConfig(url, model, key, suitability_confirmed=True))
+    return ChatModelProvider(openai_compatible_chat_model(url, model, key))
+
+
+def openai_compatible_chat_model(url, model, key):
+    """LangChain's OpenAI-compatible chat model for the configured chat-completions endpoint.
+
+    The configuration stores the full chat-completions URL; LangChain wants the API base.
+    OpenCode Go rejects requests without an application User-Agent (and a per-request
+    `x-opencode-session` header, which `ChatModelProvider` sends per conversation).
+    """
+    from langchain_openai import ChatOpenAI
+
+    base_url = url.rstrip("/").removesuffix("/chat/completions")
+    return ChatOpenAI(model=model, base_url=base_url, api_key=key, max_retries=0, timeout=60,
+                      default_headers={"User-Agent": USER_AGENT})
 
 
 class AnswerPayload(BaseModel):

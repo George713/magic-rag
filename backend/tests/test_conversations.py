@@ -67,12 +67,13 @@ def test_cited_answer_is_saved_with_original_evidence_and_stable_conversation_se
     ingest_sample(path)
     sessions = []
 
-    class Provider:
-        def answer(self, question, evidence, session_id, *, context=None):
-            sessions.append(session_id)
-            return {"text": "The back face has flying.", "citations": ["sample-delver"], "insufficient_evidence": False}
+    from scripted_chat_model import ScriptedChatModel
 
-    with TestClient(create_app(path, provider=Provider())) as client:
+    def answer(call):
+        sessions.append(call.session)
+        return {"text": "The back face has flying.", "citations": ["sample-delver"], "insufficient_evidence": False}
+
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[answer]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         trace = client.post("/api/search", json={"question": "Delver", "conversation_id": conversation_id, "generate_answer": True}).json()
     with TestClient(create_app(path)) as restarted:

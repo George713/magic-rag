@@ -18,7 +18,7 @@ The browser resubmits its active controls on every search. API clients may omit 
 
 ## Provider and verification
 
-The existing server-side provider/model/key configuration and workload-suitability guard also govern rewriting. `ChatCompletionsProvider.rewrite` uses a separate async JSON request with the stable conversation session ID and a 30-second HTTP timeout. No default paid provider is selected. OpenCode Go's suitability for this card-assistance workload remains unresolved; no live rewrite or answer request has been sent under that assumption.
+The existing server-side provider/model/key configuration and workload-suitability guard also govern rewriting. Rewriting is a separate async JSON request through the same LangChain chat model as answer generation, with the conversation ID as the session ID. No default paid provider is selected. A live rewrite is recorded in [provider live checks](providers.md#live-application-check).
 
 ```powershell
 uv run pytest backend/tests/test_rewriting.py
@@ -26,4 +26,4 @@ cd web
 npx playwright test -c playwright.rewriting.config.ts
 ```
 
-Deterministic API tests cover the artifact-sacrifice topic followed by “Any cheaper ones?” across all four retrieval modes, unchanged explicit filters, filter inheritance/clear, conversation isolation, saved provenance, malformed/outage fallback, completed-vs-partial history, and the production adapter using an external HTTP transport substitute. The browser check on isolated ports 8111/5211 covers original/actual query display, retained controls, fallback, subsequent standalone search, reopening history, and mobile layout. These checks establish behavior, not remote-model rewrite quality. A live provider smoke remains subject to suitability and credentials.
+Deterministic API tests cover the artifact-sacrifice topic followed by “Any cheaper ones?” across all four retrieval modes, unchanged explicit filters, filter inheritance/clear, conversation isolation, saved provenance, malformed/outage fallback, completed-vs-partial history, and the request sent to the chat model, using a deterministic scripted chat model. The browser check on isolated ports 8111/5211 covers original/actual query display, retained controls, fallback, subsequent standalone search, reopening history, and mobile layout. These checks establish behavior, not remote-model rewrite quality. One live rewrite is recorded in the provider guide.

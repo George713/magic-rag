@@ -22,8 +22,17 @@ Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go:
 
 - **Outcome: tool calls work.** On two consecutive runs, both the non-streamed and streamed requests returned exactly one `search_cards` call with `finish_reason='tool_calls'`, a call ID, and a model-written query (for example `{"query": "red instant deal 3 damage to creature"}`) for the question "a red instant that deals 3 damage to a creature".
 - **Streaming:** Streamed tool-call chunks (6–7 per response) merged into a complete, parseable call with no `invalid_tool_calls`.
-- **Quirk: session header required.** Requests without an `x-opencode-session` header fail with HTTP 400 ("Request is missing x-opencode-session and cannot be routed efficiently"). Go's client guidance asks clients to send a stable session ID per conversation and an application-specific user agent. The script sends a fresh UUID per run and `User-Agent: magic-rag/0.1`. The application adapter must send the same headers, with one session ID per conversation.
+- **Quirk: session header required.** Requests without an `x-opencode-session` header fail with HTTP 400 ("Request is missing x-opencode-session and cannot be routed efficiently"). Go's client guidance asks clients to send a stable session ID per conversation and an application-specific user agent. The script sends a fresh UUID per run and `User-Agent: magic-rag/0.1`. The application sends the same headers, with the conversation ID as the session ID.
 - The model chose to call the tool without `tool_choice` forcing. Answer quality and citation behavior were not tested.
+
+### Live application check
+
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the FastAPI application (in-process, a copy of the full local corpus, keyword mode, credentials from `.env`):
+
+- **Outcome: cited answers work through LangChain's chat model.** The synchronous answer to "What does Lightning Bolt do?" completed with validated citations (Lightning Bolt and the Lightning Bolt face of Emeritus of Conflict) and accurate card text.
+- **Rewriting:** the follow-up "Which of those costs less than 2 mana?" was rewritten to "Does Lightning Bolt cost less than 2 mana?".
+- **Streaming:** the follow-up's streamed answer arrived in 80 text deltas and completed with four validated citations, using the JSON-object response format through LangChain's streamed path.
+- Prose correctness was checked by eye on this one exchange only; it is not an evaluation of answer quality.
 
 ## Server configuration
 
@@ -38,7 +47,7 @@ $env:MAGIC_RAG_PROVIDER_SUITABILITY_CONFIRMED = 'true'
 uv run python -m magic_rag serve
 ```
 
-There is no default endpoint, model, or paid service. The adapter implements Chat Completions JSON responses; other API families need another adapter. The endpoint must support JSON-object response format. HTTP loopback is allowed for local test providers; other endpoints require HTTPS. Credentials are sent in the Authorization header and never included in the browser status, traces, or exception messages. Environment variables are read at service startup; `.env` files are not loaded automatically.
+There is no default endpoint, model, or paid service. Answer generation (synchronous and streamed) and follow-up rewriting run through LangChain's OpenAI-compatible chat model (`ChatOpenAI`), built in `magic_rag.providers` from these variables. The configured value is the full chat-completions URL; the `/chat/completions` suffix is removed to form LangChain's API base. Every request sends `User-Agent: magic-rag/0.1`, the conversation ID as `x-opencode-session`, and the JSON-object response format, which the endpoint must support. Requests time out after 60 seconds and are not retried. HTTP loopback is allowed for local test providers; other endpoints require HTTPS. Credentials are sent in the Authorization header and never included in the browser status, traces, or exception messages. Environment variables are read at service startup; `.env` files are not loaded automatically.
 
 The UI's provider status comes from `GET /api/provider`. `POST /api/search` accepts `generate_answer: true` and uses whichever retrieval mode selected the evidence. `trace.generation` includes `status`, a safe message, and, on success, `text`, `insufficient_evidence`, and validated `{card_id,name}` citations. Unknown card citations, malformed answer payloads, and uncited supported answers fail explicitly while preserving evidence. Card text cannot establish every rules interaction; the prompt and UI state that explanations are not authoritative rulings. Validation establishes citation identity, not truth of generated claims; real-model review is still required.
 
@@ -46,6 +55,6 @@ The UI's provider status comes from `GET /api/provider`. `POST /api/search` acce
 
 The answer JSON contract accepts optional `text`, `citations`, `insufficient_evidence`, and `assets` (a list of selected-evidence card IDs). Text-only, assets-only, and combined responses are supported. Usable text or at least one selected asset is required; supported prose still requires citations. Unknown fields, invented IDs, and model-supplied image URLs fail validation. The service resolves assets to the turn's saved card metadata only after successful completion; partial or cancelled streams do not publish validated assets. Source metadata may be absent on older saved turns, which remain readable. Validation does not establish the truth of prose or the availability of external images.
 
-`uv run pytest backend/tests/test_generation.py` exercises the FastAPI seam with isolated real SQLite and deterministic provider substitutes, including the actual HTTP adapter with a substituted external transport. Browser tests cover unavailable-provider evidence retention and access through the evidence disclosure. These tests do not establish remote model quality or live Go support.
+`uv run pytest backend/tests/test_generation.py` exercises the FastAPI seam with isolated real SQLite. The chat model is the single substitution point: tests pass `create_app(chat_model=...)` a deterministic scripted LangChain chat model (`backend/tests/scripted_chat_model.py`) that returns predetermined answers, streamed fragments, failures, or tool calls, and records each request. No routine check makes a remote call. Browser tests cover unavailable-provider evidence retention and access through the evidence disclosure. These tests do not establish remote model quality.
 
-When workload approval and credentials are available, run a separate smoke check using a known card query, inspect the answer's citations and insufficient-evidence behavior, and record model, date, and outcome without the key. Until then, the live integration remains unverified.
+Live checks run separately from the automated suite (see the recorded runs above). Record model, date, and outcome without the key.

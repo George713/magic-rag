@@ -21,9 +21,9 @@ Each delta is committed to the turn. Compare-and-set updates prevent late chunks
 
 SvelteKit forwards the response body without buffering and propagates disconnection. The browser decodes newline-delimited events across arbitrary network chunk boundaries. It ignores late updates after Stop and keeps retrieved evidence available if the connection fails.
 
-## Remote adapter
+## Remote model
 
-The compatible adapter sends `stream: true` and reads provider SSE content deltas. It incrementally decodes the JSON answer's `text` field, including split escape sequences, while withholding citations until the final payload validates. It requires a successful `stop` finish reason and `[DONE]`; EOF, token-limit termination, invalid JSON, unknown citations, and supported answers without citations fail explicitly. Text remains provisional until final validation. See [provider prerequisites](providers.md); live OpenCode Go suitability and credentials remain unresolved, so no live-provider smoke was run.
+The answer streams from LangChain's OpenAI-compatible chat model. The provider accumulates content chunks and incrementally decodes the JSON answer's `text` field, including split escape sequences, while withholding citations until the final payload validates. It requires a `stop` finish reason; a stream that ends early, token-limit termination, invalid JSON, unknown citations, and supported answers without citations fail explicitly. Text remains provisional until final validation. Stop and disconnection close the model stream. See [provider configuration and live checks](providers.md).
 
 ## Verification
 
@@ -33,4 +33,4 @@ cd web
 npm test -- --config playwright.streaming.config.ts
 ```
 
-API checks use real isolated SQLite with deterministic async provider/HTTP transports. They verify incremental events, persistence after restart, cancellation, disconnection, invalid citations, EOF failures, and restart recovery. Browser checks run the actual FastAPI and SvelteKit processes with a controlled provider and verify incremental display before completion, Stop, reopening completed/cancelled turns, and recovery after failure.
+API checks use real isolated SQLite with a deterministic scripted chat model. They verify incremental events, persistence after restart, cancellation, disconnection, invalid citations, EOF failures, and restart recovery. Browser checks run the actual FastAPI and SvelteKit processes with the scripted chat model and verify incremental display before completion, Stop, reopening completed/cancelled turns, and recovery after failure.
