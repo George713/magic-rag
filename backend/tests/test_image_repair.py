@@ -43,10 +43,10 @@ def test_repair_fills_legacy_evidence_and_selected_assets_without_reindexing(tmp
         assert len(images) == 2
         assert images[1]['url'] == 'https://cards.example/back.jpg'
         assert saved['selected_evidence'][0]['images'] == images
-        assert saved['stages']['keyword'][0]['images'] == images
+        assert saved['searches'][0]['stages']['keyword'][0]['images'] == images
         assert saved['generation']['text'] == original['generation']['text']
         assert saved['generation']['citations'] == original['generation']['citations']
-        assert saved['mode'] == original['mode']
+        assert saved['searches'][0]['mode'] == original['searches'][0]['mode']
         assert saved['selected_evidence'][0]['text'] == original['selected_evidence'][0]['text']
         assert client.get('/api/corpus').json() == corpus
         # Repeat repairs preserve historical image snapshots and selections.

@@ -40,11 +40,11 @@ def test_refresh_during_hybrid_search_keeps_both_branches_on_one_corpus_snapshot
         model.refresh = activate_during_query
         before = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid"}).json()
         assert before["corpus"]["id"] == "snapshot-one"
-        assert {card["card_id"] for branch in ("keyword", "vector") for card in before["stages"][branch]} == {"canonical-one"}
+        assert {card["card_id"] for branch in ("keyword", "vector") for card in before["searches"][0]["stages"][branch]} == {"canonical-one"}
         assert client.get("/api/corpus").json()["id"] == "snapshot-two"
         after = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid"}).json()
         assert after["corpus"]["id"] == "snapshot-two"
-        assert {card["card_id"] for branch in ("keyword", "vector") for card in after["stages"][branch]} == {"canonical-two"}
+        assert {card["card_id"] for branch in ("keyword", "vector") for card in after["searches"][0]["stages"][branch]} == {"canonical-two"}
 
 
 def test_import_collapses_printings_retains_all_faces_and_canonical_fields(tmp_path):
@@ -144,7 +144,7 @@ def test_database_failure_at_activation_rolls_back_both_indexes_and_corpus_ident
         assert "controlled activation failure" in response.json()["detail"]
         after = client.post("/api/search",json={"question":"Final ability","mode":"hybrid"}).json()
         assert after["corpus"] == before["corpus"]
-        assert after["stages"] == before["stages"]
+        assert after["searches"][0]["stages"] == before["searches"][0]["stages"]
 
 
 def test_download_uses_current_gzip_jsonl_contract_and_rejects_incomplete_export(tmp_path):
@@ -203,7 +203,7 @@ def test_source_images_survive_retrieval_and_saved_snapshot_refresh(tmp_path):
         assert card["images"] == [{"name":"Front", "url":"https://cards.example/front.jpg"}, {"name":"Back", "url":"https://cards.example/back.jpg"}]
         assert card["source_url"] == "https://scryfall.com/card/set/1"
         assert "Final ability." in card["text"]
-        assert trace["stages"]["vector"][0]["images"] == card["images"]
+        assert trace["searches"][0]["stages"]["vector"][0]["images"] == card["images"]
         replacement = {**original, "image_uris":{"normal":"https://cards.example/new.jpg"}, "card_faces":[] , "colors":["U"], "type_line":"Creature", "oracle_text":"Final ability."}
         source.snapshot = lambda: ({**metadata, "id":"replacement"}, [replacement])
         assert client.post("/api/corpus/import").status_code == 200
@@ -219,7 +219,7 @@ def test_legacy_database_and_saved_turn_without_images_remain_readable(tmp_path)
         conversation = client.post("/api/conversations").json()["id"]
         trace = client.post("/api/search", json={"question":"Lightning Bolt", "conversation_id":conversation}).json()
     # Seed the pre-extension storage format at the database boundary.
-    for cards in [trace["selected_evidence"], *trace["stages"].values()]:
+    for cards in [trace["selected_evidence"], *trace["searches"][0]["stages"].values()]:
         for card in cards:
             card.pop("images", None)
             card.pop("source_url", None)

@@ -68,10 +68,10 @@ def test_followup_uses_standalone_topic_in_every_stage_and_retains_filters(tmp_p
         assert response.status_code == 200
         trace = response.json()
         assert trace["question"] == FOLLOWUP
-        assert trace["query"] == STANDALONE
+        assert trace["searches"][0]["query"] == STANDALONE
         assert trace["rewrite"]["status"] == "rewritten"
         assert trace["timings_ms"]["rewrite"] >= 0
-        assert trace["filters"] == filters
+        assert trace["searches"][0]["filters"] == filters
         assert trace["selected_evidence"][0]["card_id"] == ATOG
         assert trace["generation"]["status"] == "completed"
         saved = client.get(f"/api/conversations/{conversation_id}").json()["turns"]
@@ -102,7 +102,7 @@ def test_production_rewrite_adapter_sends_conversation_context_in_a_separate_cal
         conversation_id = client.post("/api/conversations").json()["id"]
         client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id})
         response = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id})
-        assert response.json()["query"] == STANDALONE
+        assert response.json()["searches"][0]["query"] == STANDALONE
         assert response.json()["rewrite"]["status"] == "rewritten"
         assert sessions == [conversation_id]
         assert "private-key" not in response.text
@@ -125,10 +125,10 @@ def test_rewrite_failure_searches_exact_submitted_text_under_retained_filters(tm
         original = "  Any cheaper ones?  "
         response = client.post("/api/search", json={"question": original, "conversation_id": conversation_id})
         trace = response.json()
-        assert trace["query"] == original
+        assert trace["searches"][0]["query"] == original
         assert trace["rewrite"]["status"] == "unavailable"
         assert "as-is" in trace["rewrite"]["message"]
-        assert trace["filters"] == {"colors": ["R"]}
+        assert trace["searches"][0]["filters"] == {"colors": ["R"]}
         assert trace["selected_evidence"] == []
         assert "private-provider" not in response.text
         subsequent = client.post("/api/search", json={"question": "Atog", "conversation_id": conversation_id}).json()
@@ -143,12 +143,12 @@ def test_absent_provider_retains_filters_and_explicit_empty_object_clears_them(t
         initial = client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id,
                                                   "filters": {"mana_value_max": 0}}).json()
         inherited = client.post("/api/search", json={"question": "Atog", "conversation_id": conversation_id}).json()
-        assert inherited["query"] == "Atog"
+        assert inherited["searches"][0]["query"] == "Atog"
         assert inherited["rewrite"]["status"] == "unavailable"
-        assert inherited["filters"] == {"mana_value_max": 0}
+        assert inherited["searches"][0]["filters"] == {"mana_value_max": 0}
         assert inherited["selected_evidence"] == []
         cleared = client.post("/api/search", json={"question": "Atog", "conversation_id": conversation_id, "filters": {}}).json()
-        assert cleared["filters"] == {}
+        assert cleared["searches"][0]["filters"] == {}
         assert cleared["selected_evidence"][0]["card_id"] == ATOG
         assert client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]["trace"] == initial
 
@@ -166,12 +166,12 @@ def test_history_is_isolated_between_conversations(tmp_path):
         client.post("/api/search", json={"question": INITIAL, "conversation_id": first, "filters": {"colors": ["R"]}})
         other = client.post("/api/search", json={"question": "Another private topic", "conversation_id": second,
                                                 "filters": {"colors": ["U"]}}).json()
-        assert other["query"] == "Another private topic"
+        assert other["searches"][0]["query"] == "Another private topic"
         assert other["rewrite"]["status"] == "not_needed"
         followup = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": second}).json()
-        assert followup["query"] == "Another private topic Any cheaper ones?"
-        assert followup["filters"] == {"colors": ["U"]}
-        assert INITIAL not in followup["query"]
+        assert followup["searches"][0]["query"] == "Another private topic Any cheaper ones?"
+        assert followup["searches"][0]["filters"] == {"colors": ["U"]}
+        assert INITIAL not in followup["searches"][0]["query"]
 
 
 def test_unconfirmed_workload_never_sends_a_rewrite_request(tmp_path):
@@ -189,7 +189,7 @@ def test_unconfirmed_workload_never_sends_a_rewrite_request(tmp_path):
         client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id})
         followup = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id}).json()
         assert followup["rewrite"]["status"] == "unavailable"
-        assert followup["query"] == FOLLOWUP
+        assert followup["searches"][0]["query"] == FOLLOWUP
         assert requests == []
 
 
@@ -222,4 +222,4 @@ def test_rewrite_context_includes_completed_answers_but_omits_failed_partial_out
         assert json.loads(completed.text.splitlines()[-1])["generation"]["status"] == "completed"
         third = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id}).json()
         assert third["rewrite"]["status"] == "rewritten"
-        assert third["query"] == STANDALONE
+        assert third["searches"][0]["query"] == STANDALONE

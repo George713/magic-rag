@@ -23,12 +23,12 @@ def test_vector_search_returns_real_sqlite_vec_distances_and_model_provenance(tm
         response = client.post("/api/search", json={"question": "accelerate mana", "mode": "vector"})
         assert response.status_code == 200
         trace = response.json()
-        assert trace["stages"]["vector"][0]["name"] == "Sol Ring"
-        assert trace["stages"]["vector"][0]["score"] == 0
-        assert trace["models"]["embedding"] == model.config
-        assert trace["settings"]["vector_metric"] == "cosine distance (lower is better)"
+        assert trace["searches"][0]["stages"]["vector"][0]["name"] == "Sol Ring"
+        assert trace["searches"][0]["stages"]["vector"][0]["score"] == 0
+        assert trace["searches"][0]["models"]["embedding"] == model.config
+        assert trace["searches"][0]["settings"]["vector_metric"] == "cosine distance (lower is better)"
         assert len(trace["selected_evidence"]) == 3
-        assert trace["timings_ms"]["vector"] >= 0
+        assert trace["searches"][0]["timings_ms"]["vector"] >= 0
 
 
 def test_missing_or_incompatible_embeddings_leave_keyword_search_available(tmp_path):

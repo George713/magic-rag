@@ -49,7 +49,7 @@ def test_exact_constraints_and_unsupported_probes_keep_quality_denominators_hone
     assert report["quality_question_count"] == 1
     supported, unsupported = report["questions"]
     for run in supported["runs"].values():
-        assert run["trace"]["filters"] == {"colors":["U"],"card_types":["Creature"],"mana_value_max":1.0}
+        assert run["trace"]["searches"][0]["filters"] == {"colors":["U"],"card_types":["Creature"],"mana_value_max":1.0}
         assert all(card["card_id"] == "sample-delver" for card in run["trace"]["selected_evidence"])
     assert unsupported["runs"]["vector"]["metrics"] is None
     assert unsupported["runs"]["vector"]["trace"]["selected_evidence"]
@@ -75,7 +75,7 @@ def test_report_records_warmups_settings_metric_definitions_and_execution_enviro
     for run in report["questions"][0]["runs"].values():
         assert run["application_call_ms"] >= 0
         assert run["trace"]["timings_ms"]["retrieval"] >= 0
-        assert run["trace"]["settings"]["rrf_constant"] == 10
+        assert run["trace"]["searches"][0]["settings"]["rrf_constant"] == 10
 
 
 @pytest.mark.parametrize("mutation", ["cutoff_exceeds_evidence","duplicate_question","unsupported_positive","missing_positive","invalid_settings"])

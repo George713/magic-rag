@@ -17,8 +17,8 @@ def test_real_bge_encoding_and_sqlite_vector_search(tmp_path):
         response = client.post("/api/search", json={"question":"a spell that deals three damage", "mode":"vector"})
         assert response.status_code == 200
         assert len(response.json()["selected_evidence"]) == 3
-        assert response.json()["models"]["embedding"]["dimensions"] == 384
-        assert len(response.json()["models"]["embedding"]["revision"]) == 40
+        assert response.json()["searches"][0]["models"]["embedding"]["dimensions"] == 384
+        assert len(response.json()["searches"][0]["models"]["embedding"]["revision"]) == 40
     assert len(model.document("ability " * 600 + " final ability")) == 384
     with pytest.raises(EmbeddingError, match="not truncated"):
         model.query("ability " * 600)
@@ -34,9 +34,9 @@ def test_real_cross_encoder_reranks_and_rejects_oversized_pairs(tmp_path):
         response = client.post("/api/search", json={"question":"a spell dealing three damage", "mode":"hybrid_rerank"})
         assert response.status_code == 200
         trace = response.json()
-        assert len(trace["stages"]["reranked"]) == 3
-        assert len(trace["models"]["reranker"]["revision"]) == 40
-        assert trace["models"]["embedding"]["model"] != trace["models"]["reranker"]["model"]
+        assert len(trace["searches"][0]["stages"]["reranked"]) == 3
+        assert len(trace["searches"][0]["models"]["reranker"]["revision"]) == 40
+        assert trace["searches"][0]["models"]["embedding"]["model"] != trace["searches"][0]["models"]["reranker"]["model"]
     assert len(reranker.score("query", ["ability " * 600 + " final ability"])) == 1
     with pytest.raises(RerankingError, match="not truncated"):
         reranker.score("query " * 600, ["short evidence"])

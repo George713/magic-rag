@@ -65,7 +65,7 @@ def register_streaming(app, store, provider):
         async def events():
             nonlocal generation
             evidence = turn["trace"]["selected_evidence"]
-            context = turn["trace"].get("answer_context", {"retrieval_query":turn["trace"]["query"],"conversation_context":[]})
+            context = turn["trace"]["answer_context"]
             iterator = None
             try:
                 yield encode_event("start", generation=generation)
