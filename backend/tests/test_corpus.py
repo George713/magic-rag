@@ -250,8 +250,8 @@ def test_import_does_not_expose_non_https_image_or_source_urls(tmp_path):
 
 
 def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restart(tmp_path):
-    from scripted_chat_model import ScriptedChatModel
-    model = ScriptedChatModel(script=[lambda call: {"assets": [call.source["selected_evidence"][0]["card_id"]]}])
+    from scripted_chat_model import ScriptedChatModel, search_call
+    model = ScriptedChatModel(script=[search_call("Final ability"), lambda call: {"assets": [call.source["selected_evidence"][0]["card_id"]]}])
 
     source = FixtureSource()
     metadata, records = source.snapshot()

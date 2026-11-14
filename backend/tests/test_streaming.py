@@ -9,16 +9,16 @@ from fastapi.testclient import TestClient
 
 from magic_rag.app import create_app
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel
+from scripted_chat_model import ScriptedChatModel, search_call
 
 
 def scripted(*fragments):
-    """One streamed model response made of explicit content fragments."""
+    """A search for "Delver", then one streamed answer made of explicit content fragments."""
     async def respond(call):
         for fragment in fragments:
             yield fragment
             await asyncio.sleep(0)
-    return ScriptedChatModel(script=[respond])
+    return ScriptedChatModel(script=[search_call("Delver"), respond])
 
 
 def send_message(client, conversation_id, question="Delver", **body):
@@ -33,7 +33,7 @@ def test_one_message_streams_its_search_then_answer_deltas_then_done_and_reopens
     path = tmp_path / "cards.db"
     ingest_sample(path)
     answer = {"text": "The transformed face has flying.", "citations": ["sample-delver"], "insufficient_evidence": False}
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[answer]))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), answer]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         events = send_message(client, conversation_id, "Delver")
         kinds = [event["event"] for event in events]
@@ -69,7 +69,7 @@ def test_failed_stream_preserves_partial_text_and_is_not_completed(tmp_path):
 
     path = tmp_path / "cards.db"
     ingest_sample(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[failing]))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), failing]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         response = client.post(f"/api/conversations/{conversation_id}/messages", json={"question": "Delver"})
         events = [json.loads(line) for line in response.text.splitlines()]
@@ -97,7 +97,7 @@ def test_stop_cancels_waiting_model_and_preserves_partial_state(tmp_path):
 
     path = tmp_path / "cards.db"
     ingest_sample(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[waiting]))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), waiting]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         with ThreadPoolExecutor() as pool:
             response_future = pool.submit(client.post, f"/api/conversations/{conversation_id}/messages", json={"question": "Delver"})
@@ -117,26 +117,25 @@ def test_stop_cancels_waiting_model_and_preserves_partial_state(tmp_path):
         assert turn["answer"] == "An unfinished "
 
 
-def test_stop_while_the_search_runs_ends_the_request_before_any_search_or_answer(tmp_path):
-    rewriting = Event()
+def test_stop_while_the_agent_chooses_its_search_ends_the_request_before_any_search_or_answer(tmp_path):
+    choosing = Event()
     release = Event()
 
     def model(call):
-        if "history" in call.source:
-            rewriting.set()
+        if call.kwargs.get("tools"):
+            choosing.set()
             release.wait(5)
-            return {"query": "Delver"}
+            return search_call("Delver")
         return {"text": "Never streamed.", "citations": ["sample-delver"]}
 
     path = tmp_path / "cards.db"
     ingest_sample(path)
     with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
-        send_message(client, conversation_id, "Delver")
         with ThreadPoolExecutor() as pool:
-            response_future = pool.submit(client.post, f"/api/conversations/{conversation_id}/messages", json={"question": "Show it again"})
-            assert rewriting.wait(5)
-            turn = client.get(f"/api/conversations/{conversation_id}").json()["turns"][1]
+            response_future = pool.submit(client.post, f"/api/conversations/{conversation_id}/messages", json={"question": "Show Delver"})
+            assert choosing.wait(5)
+            turn = client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]
             assert turn["state"] == "in_progress" and turn["trace"]["searches"] == []
             assert client.post(f"/api/conversations/{conversation_id}/turns/{turn['id']}/cancel").json()["status"] == "cancelled"
             response = response_future.result(timeout=5)
@@ -144,7 +143,7 @@ def test_stop_while_the_search_runs_ends_the_request_before_any_search_or_answer
         events = [json.loads(line) for line in response.text.splitlines()]
         assert [event["event"] for event in events] == ["start", "done"]
         assert events[-1]["generation"]["status"] == "cancelled"
-        saved = client.get(f"/api/conversations/{conversation_id}").json()["turns"][1]
+        saved = client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]
         assert saved["state"] == "cancelled" and saved["trace"]["searches"] == []
 
 
@@ -159,8 +158,8 @@ def test_streamed_text_holds_split_escapes_and_sends_the_conversation_session(tm
     events = [json.loads(line) for line in response.text.splitlines()]
     assert [event["text"] for event in events if event["event"] == "delta"] == ["The ", "transformed ", "face has flying."]
     assert events[-1]["generation"]["status"] == "completed"
-    assert model.calls[0].session == conversation_id
-    assert "Flying" in model.calls[0].source["selected_evidence"][0]["text"]
+    assert [call.session for call in model.calls] == [conversation_id, conversation_id]
+    assert "Flying" in model.calls[-1].source["selected_evidence"][0]["text"]
 
 
 @pytest.mark.parametrize("failure", ["unknown_citation", "uncited", "eof", "length"])
@@ -171,7 +170,7 @@ def test_incomplete_or_unsupported_stream_never_becomes_completed(tmp_path, fail
         from langchain_core.messages import AIMessage
         payload = {"text": "Partial statement", "citations": ["invented"] if failure == "unknown_citation" else ["sample-delver"] if failure == "length" else [], "insufficient_evidence": False}
         step = AIMessage(content=json.dumps(payload), response_metadata={"finish_reason": "length"}) if failure == "length" else payload
-        model = ScriptedChatModel(script=[step])
+        model = ScriptedChatModel(script=[search_call("Delver"), step])
 
     path = tmp_path / "cards.db"
     ingest_sample(path)
@@ -196,7 +195,7 @@ def test_disconnected_browser_cancels_upstream_and_saves_partial_answer(tmp_path
 
     path = tmp_path / "cards.db"
     ingest_sample(path)
-    app = create_app(path, chat_model=ScriptedChatModel(script=[disconnecting]))
+    app = create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), disconnecting]))
     with TestClient(app) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
 
@@ -270,7 +269,7 @@ def test_restart_recovers_an_interrupted_in_progress_turn_as_incomplete(tmp_path
     path = tmp_path / "cards.db"
     snapshot = tmp_path / "restart.db"
     ingest_sample(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[interrupted]))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), interrupted]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         with ThreadPoolExecutor() as pool:
             result = pool.submit(client.post, f"/api/conversations/{conversation_id}/messages", json={"question": "Delver"})
@@ -293,7 +292,7 @@ def test_stream_validates_assets_only_at_completion_and_reopens_them(tmp_path, w
     answer = {"text": "A flying transformed face." if with_text else "", "assets": ["sample-delver"], "citations": ["sample-delver"] if with_text else []}
     path = tmp_path / "assets.db"
     ingest_sample(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[answer]))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), answer]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         response = client.post(f"/api/conversations/{conversation_id}/messages", json={"question": "Delver"})
         events = [json.loads(line) for line in response.text.splitlines()]
@@ -310,7 +309,7 @@ def test_stream_validates_assets_only_at_completion_and_reopens_them(tmp_path, w
 def test_invalid_stream_asset_selection_is_never_saved_as_success(tmp_path):
     path = tmp_path / "assets.db"
     ingest_sample(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[{"assets": ["invented-card"]}]))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), {"assets": ["invented-card"]}]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         response = client.post(f"/api/conversations/{conversation_id}/messages", json={"question": "Delver"})
         answer = json.loads(response.text.splitlines()[-1])["generation"]

@@ -8,7 +8,7 @@ import uvicorn
 
 from magic_rag.app import create_app
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel
+from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
 
 
 async def answer(call):
@@ -24,8 +24,8 @@ async def answer(call):
 
 
 def chat_model(call):
-    if "history" in call.source:
-        raise RuntimeError("This fixture does not rewrite follow-ups")
+    if offers_tools(call):
+        return search_call(call.source["question"])
     return answer(call)
 
 

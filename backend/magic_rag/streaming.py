@@ -12,17 +12,18 @@ The response is newline-delimited JSON. Events, in order:
 import json
 import asyncio
 from contextlib import suppress
-from time import perf_counter
 from uuid import uuid4
 
 import anyio
+from langgraph.errors import NodeCancelledError
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from .providers import completed_answer, generate_answer, provider_status
+from .agent import run_card_search_agent
+from .context import freeze_answer_context
+from .providers import completed_answer, provider_status
 from .retrieval import combined_evidence
-from .rewriting import conversation_context, freeze_answer_context, rewrite_query
 
 SEARCHING = {"status": "searching", "message": "Searching cards.", "text": "", "citations": []}
 GENERATING = {"status": "generating", "message": "Generating from selected evidence.", "text": "", "citations": []}
@@ -93,7 +94,7 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
         turns = conversation["turns"]
         trace = store.append_trace(conversation_id, {
             "trace_id": str(uuid4()), "question": request.question, "corpus": None,
-            "searches": [], "selected_evidence": [], "timings_ms": {}, "rewrite": None,
+            "searches": [], "selected_evidence": [], "timings_ms": {},
             "answer_context": None, "generation": SEARCHING})
         turn_id = trace["turn_id"]
         stopped = asyncio.Event()
@@ -113,45 +114,53 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
             iterator = None
             try:
                 yield encode_event("start", trace=trace)
-                start = perf_counter()
-                query, rewrite = await until_stopped(
-                    rewrite_query(provider, request.question, conversation_context(turns), conversation_id), stopped)
-                corpus, searches = await until_stopped(anyio.to_thread.run_sync(
-                    retrieve, [query], mode, filters, request.settings, abandon_on_cancel=True), stopped)
-                evidence = combined_evidence(searches)
-                context = freeze_answer_context(query, turns)
-                ready = provider_status(provider)["status"] == "ready"
-                generation = dict(GENERATING) if ready and evidence else generate_answer(provider, request.question, evidence, conversation_id, context=context)
-                trace = {**trace, "corpus": corpus, "searches": searches, "selected_evidence": evidence,
-                         "timings_ms": {"rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
-                         "rewrite": rewrite, "answer_context": context, "generation": generation}
-                save(lambda saved: trace)
-                for index, search in enumerate(searches):
-                    yield search_event(index, search)
-                if generation["status"] != "generating":
-                    yield encode_event("done", generation=generation, trace=trace)
-                    return
-                iterator = provider.stream_answer(request.question, evidence, conversation_id, context=context).__aiter__()
+                iterator = run_card_search_agent(
+                    provider, retrieve, question=request.question, turns=turns, session_id=conversation_id,
+                    mode=mode, filters=filters, settings=request.settings).__aiter__()
+                searches = []
                 while True:
                     try:
                         event = await until_stopped(anext(iterator), stopped)
                     except StopAsyncIteration:
-                        raise ValueError("Stream ended without a validated answer")
-                    if "delta" in event:
+                        break
+                    if "search" in event:
+                        searches.append(event["search"])
+                        trace = {**trace, "corpus": trace["corpus"] or event["corpus"], "searches": list(searches),
+                                 "selected_evidence": combined_evidence(searches),
+                                 "timings_ms": {"retrieval": sum(search["timings_ms"]["retrieval"] for search in searches)}}
+                        save(lambda saved: trace)
+                        yield search_event(len(searches) - 1, event["search"])
+                    elif "answering" in event:
+                        generation = dict(GENERATING)
+                        trace = {**trace, "answer_context": event["answering"], "generation": generation}
+                        save(lambda saved: trace)
+                    elif "delta" in event:
                         generation["text"] += event["delta"]
                         save(lambda saved: {**saved, "generation": generation})
                         yield encode_event("delta", text=event["delta"])
-                    elif "result" in event:
-                        generation = completed_answer(event["result"], evidence, streamed_text=generation["text"])
-                        save(lambda saved: {**saved, "generation": generation})
+                    elif "result" in event or "generation" in event:
+                        generation = (completed_answer(event["result"], trace["selected_evidence"], streamed_text=generation["text"])
+                                      if "result" in event else event["generation"])
                         trace = {**trace, "generation": generation}
+                        save(lambda saved: trace)
                         yield encode_event("done", generation=generation, trace=trace)
                         return
+                if provider_status(provider)["status"] == "ready":
+                    raise ValueError("The agent ended without an answer")
+                # No ready provider: the typed text was searched as-is and no answer is generated.
+                generation = provider_status(provider)
+                trace = {**trace, "answer_context": freeze_answer_context([search["query"] for search in searches], turns),
+                         "generation": generation}
+                save(lambda saved: trace)
+                yield encode_event("done", generation=generation, trace=trace)
             except StreamStopped:
                 trace = store.get_turn(conversation_id, turn_id)["trace"]
                 yield encode_event("done", generation=trace["generation"], trace=trace)
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, NodeCancelledError) as exc:
                 finish({**generation, "status": "cancelled", "message": "Connection closed. Partial output is incomplete.", "citations": []})
+                if isinstance(exc, NodeCancelledError):
+                    # LangGraph reports a model call cancelled inside the graph as NodeCancelledError.
+                    raise asyncio.CancelledError() from exc
                 raise
             except Exception as exc:
                 finish({**generation, "status": "failed", "message": failure_message(exc), "citations": []})

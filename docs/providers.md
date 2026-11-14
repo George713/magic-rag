@@ -34,6 +34,13 @@ Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the Fast
 - **Streaming:** the follow-up's streamed answer arrived in 80 text deltas and completed with four validated citations, using the JSON-object response format through LangChain's streamed path.
 - Prose correctness was checked by eye on this one exchange only; it is not an evaluation of answer quality.
 
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the agent graph and the streamed-message endpoint (in-process FastAPI, a copy of the full local corpus, keyword mode, search limit 1, credentials from `.env`):
+
+- **Outcome: model-written searches and cited streamed answers work.** For the first-turn question "something red that kills a small creature at instant speed", the model called `search_cards` (with `tool_choice: "required"`) with the query "deals damage to target creature instant red" (8 cards), then the separate JSON-format answer streamed in 68 text deltas and completed with three validated citations (Slaying Fire, Searing Barrage, Chandra's Defeat).
+- **Follow-up:** "which of those costs only one mana?" received bounded context; the model searched "Chandra's Defeat" and the answer completed with validated citations. With one search, it could not look up the other earlier cards.
+- **Out of scope:** "Build me the best burn deck around Lightning Bolt" searched "Lightning Bolt"; the answer declined deck building and explained the retrieved cards with validated citations.
+- Tool calls and the JSON response format were never combined in one request. Answer quality was checked by eye on these three questions only.
+
 ## Server configuration
 
 Set these variables in the PowerShell session running **Python**, then restart that service:
@@ -47,7 +54,7 @@ $env:MAGIC_RAG_PROVIDER_SUITABILITY_CONFIRMED = 'true'
 uv run python -m magic_rag serve
 ```
 
-There is no default endpoint, model, or paid service. Answer generation (synchronous and streamed) and follow-up rewriting run through LangChain's OpenAI-compatible chat model (`ChatOpenAI`), built in `magic_rag.providers` from these variables. The configured value is the full chat-completions URL; the `/chat/completions` suffix is removed to form LangChain's API base. Every request sends `User-Agent: magic-rag/0.1`, the conversation ID as `x-opencode-session`, and the JSON-object response format, which the endpoint must support. Requests time out after 60 seconds and are not retried. HTTP loopback is allowed for local test providers; other endpoints require HTTPS. Credentials are sent in the Authorization header and never included in the browser status, traces, or exception messages. Environment variables are read at service startup; `.env` files are not loaded automatically.
+There is no default endpoint, model, or paid service. Answer generation (synchronous and streamed) and the card-search agent's tool calls run through LangChain's OpenAI-compatible chat model (`ChatOpenAI`), built in `magic_rag.providers` from these variables. The configured value is the full chat-completions URL; the `/chat/completions` suffix is removed to form LangChain's API base. Every request sends `User-Agent: magic-rag/0.1` and the conversation ID as `x-opencode-session`. The agent's search requests bind one `search_cards` tool (the first with `tool_choice: "required"`) and no response format; the answer is a separate request with the JSON-object response format, which the endpoint must support, and no tools. Requests time out after 60 seconds and are not retried. HTTP loopback is allowed for local test providers; other endpoints require HTTPS. Credentials are sent in the Authorization header and never included in the browser status, traces, or exception messages. Environment variables are read at service startup; `.env` files are not loaded automatically.
 
 The UI's provider status comes from `GET /api/provider`. `POST /api/search` accepts `generate_answer: true` and uses whichever retrieval mode selected the evidence. `trace.generation` includes `status`, a safe message, and, on success, `text`, `insufficient_evidence`, and validated `{card_id,name}` citations. Unknown card citations, malformed answer payloads, and uncited supported answers fail explicitly while preserving evidence. Card text cannot establish every rules interaction; the prompt and UI state that explanations are not authoritative rulings. Validation establishes citation identity, not truth of generated claims; real-model review is still required.
 
