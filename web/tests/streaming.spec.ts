@@ -31,7 +31,7 @@ test('one request shows a live search line, then streams the answer, and reopeni
  await expandEvidence(page);await expect(page.locator('article[id$="-card-sample-delver"]')).toContainText('Flying');
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
- await expect(page.getByRole('list',{name:'Searches'}).getByRole('listitem')).toHaveText(['searching "Delver" · 1 card']);
+ await expect(page.locator('.search-summary > summary')).toHaveText(/^1 search /);
  await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
  await expect(page.locator('.answer .heading')).toContainText('Evidence grounded');
 });

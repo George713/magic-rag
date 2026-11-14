@@ -41,6 +41,12 @@ Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the agen
 - **Out of scope:** "Build me the best burn deck around Lightning Bolt" searched "Lightning Bolt"; the answer declined deck building and explained the retrieved cards with validated citations.
 - Tool calls and the JSON response format were never combined in one request. Answer quality was checked by eye on these three questions only.
 
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the agent graph and the streamed-message endpoint (in-process FastAPI, a copy of the full local corpus, keyword mode, search limit 3, credentials from `.env`):
+
+- **Outcome: the model searches once per compared card.** "compare Lightning Bolt and Shock" produced two searches in order, "Lightning Bolt" (8 cards) and "Shock" (5 cards). The combined evidence held 13 cards, and the streamed answer (77 text deltas) completed with validated citations of Lightning Bolt and Shock and accurate card text.
+- **Second comparison:** "how does Llanowar Elves compare with Elvish Mystic?" searched "Llanowar Elves" and "Elvish Mystic" (8 cards each, 16 combined, within the cap of 16). The answer completed with citations of both cards and called them functionally identical, which matches the card text.
+- Neither question used the third search, so the search limit was never reached live; the limit is covered by deterministic tests only. Answer quality was checked by eye on these two questions only.
+
 ## Server configuration
 
 Set these variables in the PowerShell session running **Python**, then restart that service:

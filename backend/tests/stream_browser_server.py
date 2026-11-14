@@ -8,7 +8,7 @@ import uvicorn
 
 from magic_rag.app import create_app
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
+from scripted_chat_model import ScriptedChatModel, offers_tools, search_call, search_once
 
 
 async def answer(call):
@@ -32,4 +32,4 @@ def chat_model(call):
 if __name__ == "__main__":
     path = Path(os.environ["MAGIC_RAG_DB"])
     ingest_sample(path)
-    uvicorn.run(create_app(path, chat_model=ScriptedChatModel(script=chat_model)), host="127.0.0.1", port=8100)
+    uvicorn.run(create_app(path, chat_model=ScriptedChatModel(script=search_once(chat_model))), host="127.0.0.1", port=8100)

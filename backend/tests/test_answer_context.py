@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from magic_rag.app import create_app
 from artifact_cards import ATOG, INITIAL, FOLLOWUP, STANDALONE, seed_artifact_cards
-from scripted_chat_model import ScriptedChatModel, offers_tools, search_call, searching
+from scripted_chat_model import search_once, ScriptedChatModel, offers_tools, search_call, searching
 from test_streaming import send_message
 
 
@@ -77,7 +77,7 @@ def test_completed_asset_references_reach_the_followup_search_and_frozen_answer_
         return {"assets":[ATOG], "text":text, "citations":[ATOG] if text else []}
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=search_once(model)))) as client:
         conversation = client.post("/api/conversations").json()["id"]
         assert send_message(client, conversation, "Atog")[-1]["generation"]["status"] == "completed"
         followup = send_message(client, conversation, "Which of those cost less mana?")[-1]["trace"]
@@ -122,7 +122,7 @@ def test_selected_asset_names_share_existing_context_character_and_history_limit
     seed_artifact_cards(path)
     with connect(path) as database:
         database.execute("UPDATE cards SET name = ? WHERE card_id = ?", ("Atog " + "x" * 9000, ATOG))
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=search_once(model)))) as client:
         conversation = client.post("/api/conversations").json()["id"]
         for index in range(8):
             first = client.post("/api/search", json={"question":f"Atog {index}", "conversation_id":conversation, "generate_answer":True}).json()

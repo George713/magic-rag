@@ -3,8 +3,9 @@
 The response is newline-delimited JSON. Events, in order:
 
 - `start`: the saved in-progress turn (`trace`, with `conversation_id` and `turn_id`);
-- `search`: one per completed search, in order (`index`, `query`, `card_count`, `top_cards`, and the
-  full search record as `search`, i.e. its retrieval details);
+- `search`: one per completed search, in order (`index`, `query`, `card_count`, `top_cards`, the
+  full search record as `search`, i.e. its retrieval details, and the combined `selected_evidence`
+  of the searches so far);
 - `delta`: answer text fragments;
 - `done`: the final `generation` (validated answer, failure, cancellation, or provider status) and the
   saved `trace`.
@@ -58,11 +59,11 @@ def encode_event(event, **data):
     return json.dumps({"event": event, **data}) + "\n"
 
 
-def search_event(index, search):
+def search_event(index, search, combined):
     evidence = search["selected_evidence"]
     return encode_event("search", index=index, query=search["query"], card_count=len(evidence),
                         top_cards=[{"card_id": card["card_id"], "name": card["name"]} for card in evidence[:TOP_CARDS]],
-                        search=search)
+                        search=search, selected_evidence=combined)
 
 
 def failure_message(exc):
@@ -129,7 +130,7 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
                                  "selected_evidence": combined_evidence(searches),
                                  "timings_ms": {"retrieval": sum(search["timings_ms"]["retrieval"] for search in searches)}}
                         save(lambda saved: trace)
-                        yield search_event(len(searches) - 1, event["search"])
+                        yield search_event(len(searches) - 1, event["search"], trace["selected_evidence"])
                     elif "answering" in event:
                         generation = dict(GENERATING)
                         trace = {**trace, "answer_context": event["answering"], "generation": generation}
