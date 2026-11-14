@@ -6,6 +6,9 @@ test.beforeEach(async({request})=>{for(const chat of await(await request.get('/a
 test('reopen ordered original evidence and delete saved conversations after reload',async({page})=>{
  await page.goto('/');
  await page.getByLabel('Your question').fill('Delver');await page.getByRole('button',{name:'Send',exact:true}).click();
+ // Without a provider the typed text is searched as-is; the search line and the provider status are shown.
+ await expect(page.getByRole('list',{name:'Searches'}).getByRole('listitem')).toHaveText(['searching "Delver" · 1 card']);
+ await expect(page.getByTestId('generation-status')).toContainText('not configured');
  await expandEvidence(page);await expect(page.getByRole('heading',{name:'Delver of Secrets // Insectile Aberration'})).toBeVisible();
  await page.getByLabel('Your question').fill('Sol Ring');await page.getByRole('button',{name:'Send',exact:true}).click();
  await expandEvidence(page);await expect(page.getByRole('heading',{name:'Sol Ring',exact:true})).toBeVisible();
@@ -14,7 +17,10 @@ test('reopen ordered original evidence and delete saved conversations after relo
  await expandEvidence(page);await expect(page.getByRole('heading',{name:'Lightning Bolt',exact:true})).toBeVisible();
  await page.reload();await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
  await expect(page.locator('.turn')).toHaveCount(2);
- const first=page.locator('.turn').first();await first.getByText('Retrieval details',{exact:true}).click();
+ const first=page.locator('.turn').first();
+ await expect(first.getByRole('list',{name:'Searches'}).getByRole('listitem')).toHaveText(['searching "Delver" · 1 card']);
+ await expect(first.getByTestId('generation-status')).toContainText('not configured');
+ await first.getByText('Retrieval details',{exact:true}).click();
  // One inspector section per saved search, each with its own query, rankings, and timings.
  const searches=first.getByRole('region',{name:/^Search \d+$/});await expect(searches).toHaveCount(1);
  const search=first.getByRole('region',{name:'Search 1',exact:true});

@@ -4,10 +4,11 @@
  import FilterControls from '$lib/FilterControls.svelte';
  import Answer from '$lib/Answer.svelte';
  import TurnEvidence from '$lib/TurnEvidence.svelte';
+ import SearchLines from '$lib/SearchLines.svelte';
  import type {Conversation} from '$lib/conversations';
  import type {Trace,Generation} from '$lib/types';
  import type {ExactFilters} from '$lib/filters';
- import {answerPath,streamAnswer} from '$lib/answer-stream';
+ import {cancelPath,streamMessage} from '$lib/message-stream';
  let question='';let traces:Trace[]=[];let filters:ExactFilters={};let conversationId:string|null=null;
  let history:ConversationHistory;let busy=false;let navigationLoading=false;let generating=false;let ready=false;let error='';
  let providerMessage='Remote generation is not configured.';let mode='keyword';let operation=0;
@@ -15,6 +16,7 @@
  let settings={keyword_candidates:20,vector_candidates:20,rrf_constant:60,evidence_limit:8,rerank_candidates:40};
  function select(conversation:Conversation|null){traces=conversation?.turns.map(turn => turn.trace)||[];filters=structuredClone(conversation?.current_filters||{});mode=conversation?.current_mode||mode;question='';error='';historyOpen=false;}
  function update(turn:Trace,generation:Generation){traces=traces.map(t => t.turn_id===turn.turn_id ? {...t,generation} : t);}
+ function replace(turn:Trace){traces=traces.map(t => t.turn_id===turn.turn_id ? turn : t);}
  async function persistFilters(){await tick();try{await history.persistFilters(filters);}catch(e){error=e instanceof Error?e.message:'Filters could not be saved.';}}
  async function persistMode(value:string){try{await history.persistMode(value);}catch(e){error=e instanceof Error?e.message:'Search mode could not be saved.';}}
  onMount(async()=>{ready=true;try{providerMessage=(await(await fetch('/api/provider')).json()).message;}catch{providerMessage='Provider status is unavailable. Retrieval remains available.';}});
@@ -23,26 +25,28 @@
   event.preventDefault();if(busy || navigationLoading)return;busy=true;error='';const current=++operation;const submitted=question;
   try{
    await history.flush();const id=await history.ensureConversation();
-   const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:submitted,mode,settings,filters,generate_answer:false,conversation_id:id})});
-   const result=await response.json();
-   if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:Array.isArray(result.detail)?result.detail.map((item:{msg:string})=>item.msg).join(' '):'Search failed. Check the question and filters.');
-   const turn:Trace=result;active=turn;traces=[...traces,turn];question='';
-   await history.saved(turn);
+   // One streamed request per message: the turn starts, its searches arrive, then the answer streams.
    controller=new AbortController();generating=true;
-   await streamAnswer(turn,generation=>{if(operation===current)update(turn,generation);},controller.signal);
+   const turn=await streamMessage(id,{question:submitted,mode,settings,filters},next=>{
+    if(operation!==current)return;
+    if(!active){active=next;traces=[...traces,next];question='';void history.saved(next);}
+    else replace(next);
+   },controller.signal);
    // The stream is authoritative for this in-flight response. Refresh navigation only;
    // production saves terminal output before sending done.
-   if(operation===current)await history.saved(turn);
-  }catch(e){if(operation===current){error=e instanceof Error?e.message:'Search failed. Try again.';if(generating&&active){const latest=traces.find(t=>t.turn_id===active?.turn_id);if(latest)update(latest,{...latest.generation,status:'failed',message:'The answer connection failed. Partial output is incomplete; retrieved evidence is preserved.',citations:[],assets:[]});}}}
+   if(operation===current&&turn)await history.saved(turn);
+  }catch(e){if(operation===current){error=e instanceof Error?e.message:'Search failed. Try again.';if(active){const latest=traces.find(t=>t.turn_id===active?.turn_id);if(latest)update(latest,{...latest.generation,status:'failed',message:'The answer connection failed. Partial output is incomplete; retrieved evidence is preserved.',citations:[],assets:[]});}}}
   finally{if(operation===current){busy=false;generating=false;controller=null;active=null;}}
  }
  async function stopAnswer(){
-  const turn=active;const abort=controller;if(!turn||!abort)return;
+  const turn=active;const abort=controller;if(!abort)return;
   const current=++operation;busy=false;generating=false;controller=null;active=null;
+  // Before the turn has started there is nothing to cancel by ID; closing the request cancels it.
+  if(!turn){abort.abort();return;}
   const latest=traces.find(t=>t.turn_id===turn.turn_id)||turn;
   update(turn,{...latest.generation,status:'cancelled',message:'Answer stopped. Partial output is incomplete.',citations:[],assets:[]});abort.abort();
   const isCurrent=()=>operation===current&&conversationId===turn.conversation_id;
-  try{const response=await fetch(answerPath(turn,'cancel'),{method:'POST',signal:AbortSignal.timeout(3000)});if(!response.ok)throw new Error();const generation=await response.json();if(isCurrent())update(turn,generation.status==='cancelled'?{...generation,message:'Answer stopped. Partial output is incomplete.'}:generation);}
+  try{const response=await fetch(cancelPath(turn),{method:'POST',signal:AbortSignal.timeout(3000)});if(!response.ok)throw new Error();const generation=await response.json();if(isCurrent())update(turn,generation.status==='cancelled'?{...generation,message:'Answer stopped. Partial output is incomplete.'}:generation);}
   catch{if(isCurrent())error='Stop could not reach the service within three seconds. The stream connection was closed; partial output is incomplete.';}
  }
 </script>
@@ -61,7 +65,7 @@
     {@const prefix=`turn-${trace.turn_id || trace.trace_id}`}
     <section class="turn" aria-label={`Turn: ${trace.question}`}>
      <div class="question"><span class="speaker">YOU</span><p>{trace.question}</p></div>
-     <div class="response"><span class="speaker">MAGIC RAG</span><Answer generation={trace.generation} {prefix}/><TurnEvidence {trace} {prefix}/></div>
+     <div class="response"><span class="speaker">MAGIC RAG</span><SearchLines searches={trace.searches}/><Answer generation={trace.generation} {prefix}/>{#if trace.searches.length}<TurnEvidence {trace} {prefix}/>{/if}</div>
     </section>
    {/each}
   </div>

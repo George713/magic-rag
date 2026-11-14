@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from magic_rag.app import create_app
 from scripted_chat_model import ScriptedChatModel
 from test_rewriting import ATOG, INITIAL, FOLLOWUP, STANDALONE, seed_artifact_cards
+from test_streaming import send_message
 
 
 @pytest.mark.parametrize("streamed", [False, True])
@@ -30,20 +31,15 @@ def test_followup_answers_receive_frozen_topic_context_separate_from_card_eviden
     seed_artifact_cards(path)
     with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
         conversation = client.post("/api/conversations").json()["id"]
-        first = client.post("/api/search", json={"question":INITIAL,"conversation_id":conversation}).json()
-        failed = client.post(f'/api/conversations/{conversation}/turns/{first["turn_id"]}/stream')
-        assert json.loads(failed.text.splitlines()[-1])["generation"]["status"] == "failed"
+        assert send_message(client, conversation, INITIAL)[-1]["generation"]["status"] == "failed"
         client.post("/api/search", json={"question":"Atog","conversation_id":conversation,"generate_answer":True})
-        followup = client.post("/api/search", json={"question":FOLLOWUP,"conversation_id":conversation,"generate_answer":not streamed}).json()
         if streamed:
-            # Later and unrelated turns must not enter an already retrieved turn's answer context.
-            client.post("/api/search", json={"question":"Future topic","conversation_id":conversation})
-            other = client.post("/api/conversations").json()["id"]
-            client.post("/api/search", json={"question":"Other private conversation","conversation_id":other})
-            completed = client.post(f'/api/conversations/{conversation}/turns/{followup["turn_id"]}/stream')
-            assert json.loads(completed.text.splitlines()[-1])["generation"]["status"] == "completed"
+            events = send_message(client, conversation, FOLLOWUP)
+            assert events[1]["query"] == STANDALONE
+            followup = events[-1]["trace"]
         else:
-            assert followup["generation"]["status"] == "completed"
+            followup = client.post("/api/search", json={"question":FOLLOWUP,"conversation_id":conversation,"generate_answer":True}).json()
+        assert followup["generation"]["status"] == "completed"
         request = next(source for source in reversed(answer_requests) if source["question"] == FOLLOWUP)
         expected = [{"question":INITIAL,"query":INITIAL},{"question":"Atog","query":STANDALONE,"answer":"Completed Atog explanation."}]
         assert request["retrieval_query"] == STANDALONE
@@ -117,8 +113,7 @@ def test_failed_or_cancelled_generation_does_not_supply_shown_card_context(tmp_p
     seed_artifact_cards(path)
     with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
         conversation = client.post("/api/conversations").json()["id"]
-        first = client.post("/api/search", json={"question":"Atog", "conversation_id":conversation}).json()
-        client.post(f'/api/conversations/{conversation}/turns/{first["turn_id"]}/stream')
+        client.post(f"/api/conversations/{conversation}/messages", json={"question":"Atog"})
         saved = client.get(f"/api/conversations/{conversation}").json()["turns"][0]
         assert saved["state"] == ("cancelled" if cancelled else "failed")
         followup = client.post("/api/search", json={"question":"Those cards?", "conversation_id":conversation}).json()

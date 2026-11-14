@@ -38,7 +38,7 @@ def test_saved_turn_reopens_original_evidence_after_corpus_changes(tmp_path):
         assert saved["title"] == "Delver"
         turn = saved["turns"][0]
         assert turn["trace"] == trace
-        assert turn["state"] == "retrieval_complete"
+        assert turn["state"] == "completed"
         assert turn["answer"] is None
         assert turn["trace"]["generation"]["status"] == "unconfigured"
         assert "Flying" in turn["trace"]["selected_evidence"][0]["text"]

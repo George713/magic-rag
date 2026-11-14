@@ -262,8 +262,7 @@ def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restar
     with TestClient(create_app(path, embedder=ControlledEmbedder(), chat_model=model, corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation_id = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question": "Final ability", "conversation_id": conversation_id}).json()
-        response = client.post(f"/api/conversations/{conversation_id}/turns/{trace['turn_id']}/stream")
+        response = client.post(f"/api/conversations/{conversation_id}/messages", json={"question": "Final ability"})
         answer = json.loads(response.text.splitlines()[-1])["generation"]
         assert answer["status"] == "completed"
         assert answer["assets"][0]["images"] == [{"name": "Front", "url": "https://cards.example/front.jpg"}, {"name": "Back", "url": "https://cards.example/back.jpg"}]

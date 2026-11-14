@@ -201,12 +201,9 @@ def test_rewrite_context_includes_completed_answers_but_omits_failed_partial_out
     seed_artifact_cards(path)
     with TestClient(create_app(path, chat_model=ScriptedChatModel(script=context_model))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
-        first = client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id}).json()
-        failed = client.post(f'/api/conversations/{conversation_id}/turns/{first["turn_id"]}/stream')
-        assert json.loads(failed.text.splitlines()[-1])["generation"]["status"] == "failed"
-        second = client.post("/api/search", json={"question": "Atog", "conversation_id": conversation_id}).json()
-        completed = client.post(f'/api/conversations/{conversation_id}/turns/{second["turn_id"]}/stream')
-        assert json.loads(completed.text.splitlines()[-1])["generation"]["status"] == "completed"
+        send = lambda question: [json.loads(line) for line in client.post(f"/api/conversations/{conversation_id}/messages", json={"question": question}).text.splitlines()]
+        assert send(INITIAL)[-1]["generation"]["status"] == "failed"
+        assert send("Atog")[-1]["generation"]["status"] == "completed"
         third = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id}).json()
         assert third["rewrite"]["status"] == "rewritten"
         assert third["searches"][0]["query"] == STANDALONE
