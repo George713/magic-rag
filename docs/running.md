@@ -56,6 +56,6 @@ Chats also remember their current search mode, including unsent edits. Retrieved
 
 See [exact card filters](filters.md) for color/type matching, inclusive mana-value ranges, retained controls, and candidate eligibility across retrieval modes.
 
-See [streaming and Stop](streaming.md) for incremental explanations and saved partial states.
+See [streaming and Stop](streaming.md) for incremental explanations, Stop, and failed states.
 
 See [conversational queries](conversational-queries.md) for follow-up rewriting, original/actual query provenance, retained explicit filters, and transparent provider fallback.

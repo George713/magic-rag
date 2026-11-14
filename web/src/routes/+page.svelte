@@ -8,7 +8,7 @@
  import type {Conversation} from '$lib/conversations';
  import type {Trace,Generation} from '$lib/types';
  import type {ExactFilters} from '$lib/filters';
- import {cancelPath,streamMessage} from '$lib/message-stream';
+ import {cancelPath,removed,streamMessage} from '$lib/message-stream';
  let question='';let traces:Trace[]=[];let filters:ExactFilters={};let conversationId:string|null=null;
  let history:ConversationHistory;let busy=false;let navigationLoading=false;let generating=false;let ready=false;let error='';
  let providerMessage='Remote generation is not configured.';let mode='keyword';let operation=0;
@@ -17,6 +17,8 @@
  function select(conversation:Conversation|null){traces=conversation?.turns.map(turn => turn.trace)||[];filters=structuredClone(conversation?.current_filters||{});mode=conversation?.current_mode||mode;question='';error='';historyOpen=false;}
  function update(turn:Trace,generation:Generation){traces=traces.map(t => t.turn_id===turn.turn_id ? {...t,generation} : t);}
  function replace(turn:Trace){traces=traces.map(t => t.turn_id===turn.turn_id ? turn : t);}
+ // Nothing from a stopped run is saved: its message leaves the transcript and the question can be asked again.
+ function remove(turn:Trace){traces=traces.filter(t => t.turn_id!==turn.turn_id);if(!question.trim())question=turn.question;}
  async function persistFilters(){await tick();try{await history.persistFilters(filters);}catch(e){error=e instanceof Error?e.message:'Filters could not be saved.';}}
  async function persistMode(value:string){try{await history.persistMode(value);}catch(e){error=e instanceof Error?e.message:'Search mode could not be saved.';}}
  onMount(async()=>{ready=true;try{providerMessage=(await(await fetch('/api/provider')).json()).message;}catch{providerMessage='Provider status is unavailable. Retrieval remains available.';}});
@@ -34,20 +36,23 @@
    },controller.signal);
    // The stream is authoritative for this in-flight response. Refresh navigation only;
    // production saves terminal output before sending done.
-   if(operation===current&&turn)await history.saved(turn);
-  }catch(e){if(operation===current){error=e instanceof Error?e.message:'Search failed. Try again.';if(active){const latest=traces.find(t=>t.turn_id===active?.turn_id);if(latest)update(latest,{...latest.generation,status:'failed',message:'The answer connection failed. Partial output is incomplete; retrieved evidence is preserved.',citations:[],assets:[]});}}}
+   if(operation===current&&turn){if(removed(turn))remove(turn);await history.saved(turn);}
+  }catch(e){if(operation===current){
+   // A closed connection stops the run, and the service deletes its turn.
+   if(active){remove(active);void history.saved(active);error='The connection closed before the answer finished. The message was removed; ask again.';}
+   else error=e instanceof Error?e.message:'Search failed. Try again.';}}
   finally{if(operation===current){busy=false;generating=false;controller=null;active=null;}}
  }
  async function stopAnswer(){
   const turn=active;const abort=controller;if(!abort)return;
   const current=++operation;busy=false;generating=false;controller=null;active=null;
-  // Before the turn has started there is nothing to cancel by ID; closing the request cancels it.
+  // Before the turn has started there is nothing to delete by ID; closing the request stops the run.
   if(!turn){abort.abort();return;}
-  const latest=traces.find(t=>t.turn_id===turn.turn_id)||turn;
-  update(turn,{...latest.generation,status:'cancelled',message:'Answer stopped. Partial output is incomplete.',citations:[],assets:[]});abort.abort();
+  remove(turn);abort.abort();
   const isCurrent=()=>operation===current&&conversationId===turn.conversation_id;
-  try{const response=await fetch(cancelPath(turn),{method:'POST',signal:AbortSignal.timeout(3000)});if(!response.ok)throw new Error();const generation=await response.json();if(isCurrent())update(turn,generation.status==='cancelled'?{...generation,message:'Answer stopped. Partial output is incomplete.'}:generation);}
-  catch{if(isCurrent())error='Stop could not reach the service within three seconds. The stream connection was closed; partial output is incomplete.';}
+  // Closing the stream already stops the run; Stop also deletes the turn if the run finished meanwhile.
+  try{const response=await fetch(cancelPath(turn),{method:'POST',signal:AbortSignal.timeout(3000)});if(!response.ok)throw new Error();await history.saved(turn);}
+  catch{if(isCurrent())error='Stop could not reach the service within three seconds. The stream connection was closed, which also stops the run.';}
  }
 </script>
 <svelte:head><title>Magic RAG — Card conversations</title><meta name="description" content="Discover Magic cards through grounded conversation."/></svelte:head>

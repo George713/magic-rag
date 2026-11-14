@@ -34,7 +34,7 @@ test('the live search line shows the model-written query on the first turn and o
  await page.getByLabel('Your question').fill('simulate provider failure');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const third=page.locator('section.turn').nth(2);
- await expect(third.getByTestId('generation-status')).toContainText('Answer stream failed');
+ await expect(third.getByTestId('generation-status')).toContainText('Try again');
  await expect(lines(third)).toHaveCount(0);
  await page.reload();
  await page.getByRole('button',{name:'Open conversation: something red that eats artifacts',exact:true}).first().click();

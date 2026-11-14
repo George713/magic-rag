@@ -8,7 +8,7 @@ Conversations share the configured `MAGIC_RAG_DB` SQLite database with card retr
 
 Conversation storage is versioned in the `conversation_storage` table. Opening a database saved before ordered search lists (storage version 2) wipes its conversations and turns once; old single-query turns are never migrated or read. Card data, embeddings, and corpus identity are untouched.
 
-Retrieval works without a remote provider. A turn is `in_progress` while its message runs, then `completed`, `failed`, or `cancelled`, with separate nullable `answer` and `error` fields. Without a ready provider a turn completes after its search and its generation keeps the provider status. See [streaming](streaming.md) for the message request.
+Retrieval works without a remote provider. A turn is `in_progress` while its message runs, then `completed` or `failed`, with separate nullable `answer` and `error` fields. Stop deletes the turn. Without a ready provider a turn completes after its search and its generation keeps the provider status. See [streaming](streaming.md) for the message request.
 
 ## API
 

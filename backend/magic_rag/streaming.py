@@ -7,8 +7,11 @@ The response is newline-delimited JSON. Events, in order:
   full search record as `search`, i.e. its retrieval details, and the combined `selected_evidence`
   of the searches so far);
 - `delta`: answer text fragments;
-- `done`: the final `generation` (validated answer, failure, cancellation, or provider status) and the
-  saved `trace`.
+- `done`: the final `generation` (validated answer, failure, or provider status) and the saved `trace`.
+  After Stop the turn is deleted: `done` carries a `cancelled` generation and `trace: null`.
+
+Stop, or the connection closing, deletes the turn: nothing from a stopped run is saved, including
+completed searches and partial answer text. A provider failure saves the turn as failed.
 """
 import json
 import asyncio
@@ -18,7 +21,7 @@ from uuid import uuid4
 import anyio
 from langgraph.errors import NodeCancelledError
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from .agent import run_card_search_agent
@@ -28,7 +31,8 @@ from .retrieval import combined_evidence
 
 SEARCHING = {"status": "searching", "message": "Searching cards.", "text": "", "citations": []}
 GENERATING = {"status": "generating", "message": "Generating from selected evidence.", "text": "", "citations": []}
-FAILED_MESSAGE = "Answer stream failed or ended unexpectedly. Check the provider or connection and submit another question. Retrieved evidence is preserved."
+FAILED_MESSAGE = "The provider failed before this answer was finished. Try again."
+STOPPED = {"status": "cancelled", "message": "Stopped. The message was removed.", "text": "", "citations": []}
 TOP_CARDS = 3
 
 
@@ -72,20 +76,22 @@ def failure_message(exc):
 
 
 def register_streaming(app, store, provider, *, request_model, constraints, remember, retrieve):
-    store.recover_interrupted_turns()
+    store.remove_interrupted_turns()
     active = {}
 
-    @app.post("/api/conversations/{conversation_id}/turns/{turn_id}/cancel")
+    @app.post("/api/conversations/{conversation_id}/turns/{turn_id}/cancel", status_code=204)
     async def cancel(conversation_id: str, turn_id: str):
-        turn = store.get_turn(conversation_id, turn_id)
-        generation = turn["trace"]["generation"]
-        if turn["state"] == "in_progress":
-            generation = {**generation, "status": "cancelled", "message": "Answer stopped. Partial output is incomplete.", "citations": []}
-            store.update_generation(conversation_id, turn_id, generation, expected_states={"in_progress"})
-            stopped = active.get((conversation_id, turn_id))
-            if stopped is not None:
-                stopped.set()
-        return store.get_turn(conversation_id, turn_id)["trace"]["generation"]
+        """Stop: delete the message's turn and end its run.
+
+        Idempotent: the turn may already be gone because the browser closed the stream first. Stop also
+        removes a turn whose run finished just before Stop arrived, so a stopped message never reappears.
+        """
+        store.get(conversation_id)
+        store.delete_turn(conversation_id, turn_id)
+        stopped = active.get((conversation_id, turn_id))
+        if stopped is not None:
+            stopped.set()
+        return Response(status_code=204)
 
     @app.post("/api/conversations/{conversation_id}/messages")
     async def message(conversation_id: str, request: request_model):
@@ -105,9 +111,9 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
             if not store.update_trace(conversation_id, turn_id, change, expected_states={"in_progress"}):
                 raise StreamStopped()
 
-        def finish(generation):
-            # Terminal states are written once; a concurrent Stop wins the compare-and-set.
-            store.update_generation(conversation_id, turn_id, generation, expected_states={"in_progress"})
+        def discard():
+            # Removes the turn only while its run is unfinished; completed and failed turns stay.
+            store.delete_turn(conversation_id, turn_id, expected_states={"in_progress"})
 
         async def events():
             nonlocal trace
@@ -155,20 +161,24 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
                 save(lambda saved: trace)
                 yield encode_event("done", generation=generation, trace=trace)
             except StreamStopped:
-                trace = store.get_turn(conversation_id, turn_id)["trace"]
-                yield encode_event("done", generation=trace["generation"], trace=trace)
+                discard()
+                yield encode_event("done", generation=STOPPED, trace=None)
             except (asyncio.CancelledError, NodeCancelledError) as exc:
-                finish({**generation, "status": "cancelled", "message": "Connection closed. Partial output is incomplete.", "citations": []})
+                # The connection closed: the run is stopped and its turn removed (in `finally`).
                 if isinstance(exc, NodeCancelledError):
                     # LangGraph reports a model call cancelled inside the graph as NodeCancelledError.
                     raise asyncio.CancelledError() from exc
                 raise
             except Exception as exc:
-                finish({**generation, "status": "failed", "message": failure_message(exc), "citations": []})
-                trace = store.get_turn(conversation_id, turn_id)["trace"]
-                yield encode_event("done", generation=trace["generation"], trace=trace)
+                failed = {**generation, "status": "failed", "message": failure_message(exc), "citations": []}
+                # A concurrent Stop wins the compare-and-set: the turn is already deleted.
+                if store.update_generation(conversation_id, turn_id, failed, expected_states={"in_progress"}):
+                    trace = store.get_turn(conversation_id, turn_id)["trace"]
+                    yield encode_event("done", generation=trace["generation"], trace=trace)
+                else:
+                    yield encode_event("done", generation=STOPPED, trace=None)
             finally:
-                finish({**generation, "status": "cancelled", "message": "Answer connection ended. Partial output is incomplete.", "citations": []})
+                discard()
                 active.pop((conversation_id, turn_id), None)
                 if iterator is not None:
                     with anyio.CancelScope(shield=True):
