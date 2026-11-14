@@ -29,6 +29,21 @@ def timestamp():
     return datetime.now(timezone.utc).isoformat()
 
 
+IN_PROGRESS_STATUSES = {"searching", "generating"}
+TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+
+
+def turn_state(generation):
+    """A turn is in progress until it completes or fails (or, until Stop changes, is cancelled).
+
+    A run without a ready provider completes after its search; its generation keeps the provider status.
+    """
+    status = generation["status"]
+    if status in IN_PROGRESS_STATUSES:
+        return "in_progress"
+    return status if status in TERMINAL_STATUSES else "completed"
+
+
 # Version 2 saves an ordered list of searches per turn. Earlier single-query
 # turns are not migrated: conversations are wiped once when this version first
 # opens a database. Card data, embeddings, and corpus tables are never touched.
@@ -105,6 +120,7 @@ class ConversationStore:
         return self.get(conversation_id)
 
     def append_trace(self, conversation_id, trace):
+        """Save a new turn for this trace; its state follows the trace's generation."""
         now = timestamp()
         turn_id = str(uuid4())
         with self.connection() as db:
@@ -113,7 +129,7 @@ class ConversationStore:
                 raise HTTPException(404, "Conversation not found. Start a new conversation.")
             trace.update(conversation_id=conversation_id, turn_id=turn_id)
             generation = trace["generation"]
-            state = generation["status"] if generation["status"] in {"completed", "failed", "cancelled"} else "retrieval_complete"
+            state = turn_state(generation)
             db.execute("INSERT INTO conversation_turns VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                        (turn_id, conversation_id, trace["question"], state,
                         json.dumps(trace), generation.get("text"),
@@ -135,16 +151,22 @@ class ConversationStore:
                 return turn
         raise HTTPException(404, "Conversation turn not found.")
 
-    def recover_interrupted_answers(self):
+    def recover_interrupted_turns(self):
         with self.connection() as db:
-            interrupted = db.execute("SELECT conversation_id, id, trace FROM conversation_turns WHERE state = 'generating'").fetchall()
+            interrupted = db.execute("SELECT conversation_id, id, trace FROM conversation_turns WHERE state = 'in_progress'").fetchall()
         for row in interrupted:
             generation = json.loads(row["trace"])["generation"]
             self.update_generation(row["conversation_id"], row["id"],
-                {**generation, "status": "cancelled", "message": "Generation was interrupted by service shutdown. Partial output is incomplete.", "citations": []}, expected_states={"generating"})
+                {**generation, "status": "cancelled", "message": "Generation was interrupted by service shutdown. Partial output is incomplete.", "citations": []}, expected_states={"in_progress"})
 
     def update_generation(self, conversation_id, turn_id, generation, *, expected_states):
-        """Compare-and-set prevents late deltas from overwriting terminal turn states."""
+        return self.update_trace(conversation_id, turn_id, lambda trace: {**trace, "generation": generation}, expected_states=expected_states)
+
+    def update_trace(self, conversation_id, turn_id, change, *, expected_states):
+        """Compare-and-set prevents late searches, deltas, or completion from overwriting terminal turn states.
+
+        `change` maps the saved trace to its replacement; the turn state follows the new generation.
+        """
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT state, trace FROM conversation_turns WHERE id = ? AND conversation_id = ?", (turn_id, conversation_id)).fetchone()
@@ -152,12 +174,12 @@ class ConversationStore:
                 raise HTTPException(404, "Conversation turn not found.")
             if row["state"] not in expected_states:
                 return False
-            trace = json.loads(row["trace"])
-            trace["generation"] = generation
-            state = generation["status"] if generation["status"] in {"generating", "completed", "cancelled", "failed"} else "retrieval_complete"
+            trace = change(json.loads(row["trace"]))
+            generation = trace["generation"]
+            state = turn_state(generation)
             db.execute("UPDATE conversation_turns SET state = ?, trace = ?, answer = ?, error = ? WHERE id = ? AND conversation_id = ?",
                        (state, json.dumps(trace), generation.get("text"),
-                        generation.get("message") if generation["status"] == "failed" else None,
+                        generation.get("message") if state == "failed" else None,
                         turn_id, conversation_id))
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (timestamp(), conversation_id))
             return True

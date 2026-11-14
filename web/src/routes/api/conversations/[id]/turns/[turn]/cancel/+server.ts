@@ -1,3 +1,3 @@
-import { forwardAnswer } from '$lib/server/forward-answer';
+import { forwardStream, turnPath } from '$lib/server/forward-stream';
 import type { RequestHandler } from './$types';
-export const POST: RequestHandler = ({request,fetch,params}) => forwardAnswer(request,fetch,params.id,params.turn,'cancel');
+export const POST: RequestHandler = ({request,fetch,params}) => forwardStream(request,fetch,turnPath(params.id,params.turn,'cancel'));

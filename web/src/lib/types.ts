@@ -12,12 +12,13 @@ export interface Search {
  models: Record<string, unknown>; settings: Record<string, unknown>;
  stages: Record<string, Card[]>; selected_evidence: Card[]; timings_ms: Record<string, number>;
 }
+/** A saved turn's trace; while the turn is in progress, `rewrite` and `answer_context` are null and `searches` grows. */
 export interface Trace {
- answer_context?: {retrieval_query: string; conversation_context: {question: string; query: string; answer?: string}[]; context_truncated: boolean};
+ answer_context?: {retrieval_query: string; conversation_context: {question: string; query: string; answer?: string}[]; context_truncated: boolean} | null;
  conversation_id?: string; turn_id?: string;
  trace_id: string; question: string; corpus: {id: string; metadata: string} | null;
  searches: Search[]; selected_evidence: Card[]; timings_ms: Record<string, number>;
- rewrite: {status: string; message: string; elapsed_ms?: number}; generation: Generation;
+ rewrite: {status: string; message: string; elapsed_ms?: number} | null; generation: Generation;
 }
 export interface Generation {
  status: string; message: string; text?: string; insufficient_evidence?: boolean;

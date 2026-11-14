@@ -16,3 +16,15 @@ def fuse(branches: dict[str, list[dict]], rank_constant: int = 60, *, query: str
     ordered = sorted(cards.values(), key=lambda card: (
         not exact_name_match(card["name"], query), -card["score"], card["card_id"]))
     return [{**card, "rank": rank} for rank, card in enumerate(ordered, 1)]
+
+
+def combined_evidence(searches):
+    """Evidence for an answer is every search's selected cards, first occurrence wins."""
+    seen = set()
+    evidence = []
+    for search in searches:
+        for card in search["selected_evidence"]:
+            if card["card_id"] not in seen:
+                seen.add(card["card_id"])
+                evidence.append(card)
+    return evidence

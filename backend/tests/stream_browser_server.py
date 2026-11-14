@@ -14,6 +14,8 @@ from scripted_chat_model import ScriptedChatModel
 async def answer(call):
     question = call.source["question"]
     card_id = call.source["selected_evidence"][0]["card_id"]
+    if "slow" in question:
+        await asyncio.sleep(2)
     yield '{"text": "The transformed '
     await asyncio.sleep(15 if "stop" in question else 0.8)
     if "fail" in question:

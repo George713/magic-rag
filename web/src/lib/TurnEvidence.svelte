@@ -22,7 +22,7 @@
 <details class="retrieval-details">
  <summary>Retrieval details</summary>
  <aside aria-label="Retrieval inspector">
-  <dl><dt>Original question</dt><dd data-testid="original-question">{trace.question}</dd><dt>Query rewriting</dt><dd data-testid="rewrite-status">{trace.rewrite.status}</dd><dt>Rewrite information</dt><dd data-testid="rewrite-message">{trace.rewrite.message}</dd><dt>Active corpus</dt><dd>{trace.corpus?.id || 'No active corpus'}</dd><dt>Retrieval time</dt><dd>{trace.timings_ms.retrieval.toFixed(2)} ms</dd></dl>
+  <dl><dt>Original question</dt><dd data-testid="original-question">{trace.question}</dd><dt>Query rewriting</dt><dd data-testid="rewrite-status">{trace.rewrite?.status ?? 'pending'}</dd><dt>Rewrite information</dt><dd data-testid="rewrite-message">{trace.rewrite?.message ?? ''}</dd><dt>Active corpus</dt><dd>{trace.corpus?.id || 'No active corpus'}</dd><dt>Retrieval time</dt><dd>{trace.timings_ms.retrieval === undefined ? 'pending' : `${trace.timings_ms.retrieval.toFixed(2)} ms`}</dd></dl>
   {#each trace.searches as search,index}
    <section class="search" aria-label={`Search ${index+1}`}>
     <h4 class="search-title">Search {index+1}</h4>

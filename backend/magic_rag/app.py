@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from magic_rag.providers import ChatModelProvider, generate_answer, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
-from .retrieval import exact_name_match, fuse
+from .retrieval import combined_evidence, exact_name_match, fuse
 from .conversations import register_conversations
 from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
@@ -62,25 +62,17 @@ class RetrievalSettings(BaseModel):
     rerank_candidates: int = Field(default=40, ge=1, le=1000)
 
 
-class SearchRequest(BaseModel):
+class MessageRequest(BaseModel):
+    """One message in a conversation. Omitted filters/mode inherit the conversation's current preferences."""
     question: str = Field(min_length=1, max_length=10000)
     mode: str = "keyword"
     settings: RetrievalSettings = Field(default_factory=RetrievalSettings)
-    generate_answer: bool = False
-    conversation_id: str | None = None
     filters: ExactFilters = Field(default_factory=ExactFilters)
 
 
-def combined_evidence(searches):
-    """Evidence for an answer is every search's selected cards, first occurrence wins."""
-    seen = set()
-    evidence = []
-    for search in searches:
-        for card in search["selected_evidence"]:
-            if card["card_id"] not in seen:
-                seen.add(card["card_id"])
-                evidence.append(card)
-    return evidence
+class SearchRequest(MessageRequest):
+    generate_answer: bool = False
+    conversation_id: str | None = None
 
 
 def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, chat_model=None, corpus_source=None) -> FastAPI:
@@ -92,7 +84,6 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         db.execute("PRAGMA journal_mode=WAL")
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
-    register_streaming(app, conversations, provider)
     embedding_model = embedder or BgeEmbedder()
     reranking_model = reranker or MiniLmReranker()
     from .corpus import register_corpus
@@ -157,6 +148,32 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 "stages": stages, "selected_evidence": candidates[:settings.evidence_limit],
                 "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000}}
 
+    def search_constraints(request: MessageRequest, conversation):
+        """The filters and mode a message searches under; the request overrides the conversation's preferences."""
+        filters = request.filters
+        if conversation is not None and "filters" not in request.model_fields_set:
+            filters = ExactFilters.model_validate(conversation["current_filters"])
+        mode = conversation['current_mode'] if conversation is not None and 'mode' not in request.model_fields_set else request.mode
+        if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
+            raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
+        if not re.findall(r"[^\W_]+", request.question, flags=re.UNICODE):
+            raise HTTPException(422, "Enter at least one word to search.")
+        return filters, mode
+
+    def remember_constraints(conversation_id, request: MessageRequest, filters, mode):
+        if {"filters", "mode"} & request.model_fields_set:
+            conversations.update_preferences(conversation_id,
+                filters=filters if "filters" in request.model_fields_set else None,
+                mode=mode if "mode" in request.model_fields_set else None)
+
+    def retrieve(queries, mode, filters, settings):
+        """Run each query in one read transaction, so every search of a turn sees one corpus snapshot."""
+        with connect(path) as db:
+            db.execute("BEGIN")
+            corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
+            searches = [run_search(db, query, mode, filters, settings) for query in queries]
+        return (dict(corpus) if corpus else None), searches
+
     @app.post("/api/search")
     def search(request: SearchRequest):
         turns = []
@@ -164,39 +181,27 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         if request.conversation_id is not None:
             conversation = conversations.get(request.conversation_id)
             turns = conversation["turns"]
-        filters = request.filters
-        if conversation is not None and "filters" not in request.model_fields_set:
-            filters = ExactFilters.model_validate(conversation["current_filters"])
-        mode = conversation['current_mode'] if conversation is not None and 'mode' not in request.model_fields_set else request.mode
+        filters, mode = search_constraints(request, conversation)
         start = perf_counter()
-        if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
-            raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
-        tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
-        if not tokens:
-            raise HTTPException(422, "Enter at least one word to search.")
         trace_id = str(uuid4())
         query, rewrite = from_thread.run(rewrite_query, provider, request.question,
                                         conversation_context(turns), request.conversation_id or trace_id)
         answer_context = freeze_answer_context(query, turns)
-        with connect(path) as db:
-            db.execute("BEGIN")
-            corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            searches = [run_search(db, query, mode, filters, request.settings)]
+        corpus, searches = retrieve([query], mode, filters, request.settings)
         evidence = combined_evidence(searches)
         trace = {"trace_id": trace_id, "question": request.question,
-                "corpus": dict(corpus) if corpus else None,
+                "corpus": corpus,
                 "searches": searches, "selected_evidence": evidence,
                 "timings_ms": {"rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": rewrite,
                 "answer_context":answer_context,
                 "generation": generate_answer(provider, request.question, evidence, request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
-            if {"filters", "mode"} & request.model_fields_set:
-                conversations.update_preferences(request.conversation_id,
-                    filters=filters if "filters" in request.model_fields_set else None,
-                    mode=mode if "mode" in request.model_fields_set else None)
+            remember_constraints(request.conversation_id, request, filters, mode)
             conversations.append_trace(request.conversation_id, trace)
         return trace
 
+    register_streaming(app, conversations, provider, request_model=MessageRequest, constraints=search_constraints,
+                       remember=remember_constraints, retrieve=retrieve)
     register_evaluation(app, search, SearchRequest)
     return app
