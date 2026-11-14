@@ -1,6 +1,6 @@
 # Implementation coordination
 
-The repository-local `$implement-spec` adapts the integration-branch workflow for this project's shared application files and GitHub tracker. Use these rules when coordinating its workers.
+These rules adapt the integration-branch workflow of `$implement-spec` (vendored in `.agents/skills/implement-spec`) to this project's shared application files and GitHub tracker. Use them when coordinating its workers.
 
 ## Ownership before parallelism
 

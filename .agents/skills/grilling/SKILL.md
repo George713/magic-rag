@@ -1,41 +1,30 @@
 ---
 name: grilling
-description: "Repository-local design interview and handoff procedure for grill-me, grill-with-docs, and requests to be grilled."
+description: Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.
 ---
 
-# Grilling (repo version)
+Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
-Interview the user relentlessly until you reach shared understanding. Map the problem as a **design tree**: each decision branches into the decisions that depend on it. This is the design stage of [the repository workflow](../../../docs/workflow.md#from-design-to-implementation).
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
 
-## Interview rounds
+Format a round like so:
 
-Work the tree in rounds. The **frontier** contains every unresolved decision whose prerequisites are settled. Ask the whole frontier in one round, number each question, and give a recommended answer. Word each question so that "yes" accepts the recommendation. Then wait for the user's answers.
+```
+❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
 
-Use this format for each question:
+➡️ <your recommended answer>
 
-```text
-Q1 — <decision title>: <question and relevant choices>
-Recommended: <specific answer and brief reason>
+---
+
+❓ **Q2** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
+
+➡️ <your recommended answer>
 ```
 
-Recompute the frontier after every round. A question that depends on another unanswered question belongs in a later round. Challenge vague answers and contradictions with concrete scenarios. Include scope, constraints, important failure cases, and the behavior that would demonstrate success; mark intentional deferrals explicitly.
+Word each question so "yes" accepts your recommended answer.
 
-Finding facts is the agent's job. Inspect the repository, documentation, and existing behavior before asking the user for information available there. Use read-only exploration and isolated checks. When an environment fact needs independent exploration, dispatch a read-only subagent, and continue with decisions that do not depend on its result. Reserve implementation edits, operational data changes, and tracker/PR publication for their selected workflow stages. The with-docs entry point additionally records agreed domain documentation during the interview.
+Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
 
-## Confirm shared understanding
+Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent with a fresh context window to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
 
-When the frontier is empty, present a concise account of the goal, accepted behavior, scope, constraints, and explicitly deferred decisions. Ask **"Is this our shared understanding?"** as a separate round, and wait. Corrections reopen the affected branches.
-
-Answers such as "yes" or "yes to all" settle the questions they answer. Agreement on the design completes the interview; it does not select an implementation or publication stage.
-
-## Choose the next stage
-
-After shared understanding is confirmed, ask which skill to use next:
-
-- Recommend `$to-spec` for the usual path: `$to-spec` → `$to-tickets` → the repository-local `$implement-spec`.
-- Offer `$implement` for a small, sufficiently scoped piece of work, or the repository-local `$implement-spec` when a specification and tickets already exist.
-- The user may also finish the session at the accepted design.
-
-Wait for an explicit next-stage choice before starting that skill. Ordinary language such as "implement this now" counts; a repeated design confirmation does not. If the user confirms the summary and explicitly selects the next skill in the same reply, follow that selection without asking again. An explicitly requested sequence can authorize multiple stages; the usual sequence alone does not.
-
-Implementation invokes `code-review` itself. The user invokes `$retro` when they want a retrospective. Follow the selected skill's own completion criteria and any internal design or testing questions.
+The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.

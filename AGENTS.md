@@ -2,13 +2,7 @@
 
 ## Agent skills
 
-### Design interviews
-
-For `$grill-me`, `$grill-with-docs`, and `$grilling`, use the repository-local [Grill Me](.agents/skills/grill-me/SKILL.md), [Grill with Docs](.agents/skills/grill-with-docs/SKILL.md), and [Grilling](.agents/skills/grilling/SKILL.md) skills. Their UI names end in **(repo version)**. Follow their interview handoff and [workflow stage boundaries](docs/workflow.md#from-design-to-implementation).
-
-### Spec implementation
-
-For `/implement-spec`, use this repository's version in [.agents/skills/implement-spec/SKILL.md](.agents/skills/implement-spec/SKILL.md).
+Project skills live in [.agents/skills](.agents/skills), vendored from [Matt Pocock's skills](https://github.com/mattpocock/skills) (see [UPSTREAM.md](.agents/skills/UPSTREAM.md)). `.claude/skills` is a symlink to the same folder for Claude Code.
 
 ### Issue tracker
 
