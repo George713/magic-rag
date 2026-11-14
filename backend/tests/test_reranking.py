@@ -19,19 +19,19 @@ def test_reranker_changes_evidence_order_and_preserves_fused_positions_and_signa
     with TestClient(create_app(path, embedder=embedder, reranker=ControlledReranker())) as client:
         trace = client.post("/api/search", json={"question":"Sol Ring artifact", "mode":"hybrid_rerank",
             "settings":{"rerank_candidates":2,"evidence_limit":1}}).json()
-        assert trace["stages"]["fused"][0]["card_id"] == "sample-sol-ring"
-        reranked = trace["stages"]["reranked"]
+        assert trace["searches"][0]["stages"]["fused"][0]["card_id"] == "sample-sol-ring"
+        reranked = trace["searches"][0]["stages"]["reranked"]
         assert [c["card_id"] for c in reranked] == ["sample-delver", "sample-sol-ring"]
         assert reranked[0]["score"] == 9.0
         assert reranked[0]["fused_rank"] == 2
         assert reranked[0]["rank_change"] == 1
         assert reranked[1]["rank_change"] == -1
-        assert reranked[0]["fusion_score"] == trace["stages"]["fused"][1]["score"]
-        assert reranked[0]["signals"] == trace["stages"]["fused"][1]["signals"]
+        assert reranked[0]["fusion_score"] == trace["searches"][0]["stages"]["fused"][1]["score"]
+        assert reranked[0]["signals"] == trace["searches"][0]["stages"]["fused"][1]["signals"]
         assert trace["selected_evidence"] == [reranked[0]]
-        assert trace["models"]["embedding"] == embedder.config
-        assert trace["models"]["reranker"] == ControlledReranker.config
-        assert trace["timings_ms"]["reranking"] >= 0
+        assert trace["searches"][0]["models"]["embedding"] == embedder.config
+        assert trace["searches"][0]["models"]["reranker"] == ControlledReranker.config
+        assert trace["searches"][0]["timings_ms"]["reranking"] >= 0
 
 
 def test_reranker_failure_and_nonfinite_scores_are_explicit_and_other_modes_remain_usable(tmp_path):
@@ -66,11 +66,11 @@ def test_other_modes_bypass_reranking_and_replacing_reranker_reuses_vectors(tmp_
     with TestClient(create_app(path, embedder=embedder, reranker=UnavailableReranker())) as client:
         for mode in ("keyword", "vector", "hybrid"):
             trace = client.post("/api/search", json={"question":"Sol Ring", "mode":mode}).json()
-            assert "reranked" not in trace["stages"]
-            assert "reranker" not in trace["models"]
+            assert "reranked" not in trace["searches"][0]["stages"]
+            assert "reranker" not in trace["searches"][0]["models"]
     class ChangedReranker(ControlledReranker):
         config = {**ControlledReranker.config, "revision":"2"}
     with TestClient(create_app(path, embedder=embedder, reranker=ChangedReranker())) as client:
         trace = client.post("/api/search", json={"question":"Sol Ring", "mode":"hybrid_rerank"}).json()
-        assert trace["models"]["reranker"]["revision"] == "2"
-        assert trace["models"]["embedding"] == embedder.config
+        assert trace["searches"][0]["models"]["reranker"]["revision"] == "2"
+        assert trace["searches"][0]["models"]["embedding"] == embedder.config

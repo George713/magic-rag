@@ -48,7 +48,7 @@ For the fourth mode and before/after cross-encoder rankings, see [reranking.md](
 For a complete Scryfall corpus and atomic refreshes, see [corpus-import.md](corpus-import.md).
 For reproducible four-mode comparisons and reviewed relevance judgments, see [evaluation.md](evaluation.md).
 
-`POST /api/search` accepts `{ "question": "Delver", "mode": "keyword" }`. The response is a retrieval trace: `trace_id`, original `question`, actual `query`, `mode`, `filters`, `corpus`, `models`, effective `settings`, ranked `stages`, `selected_evidence`, `timings_ms`, `rewrite`, and `generation`. Each card has stable `card_id`, `name`, complete `text`, `mana_cost`, numeric `mana_value`, `colors`, `type_line`, `rank`, and raw `score`. Branch, fused, and reranked stages preserve canonical card identity. `GET /api/health` reports SQLite/extension versions, support, and corpus information.
+`POST /api/search` accepts `{ "question": "Delver", "mode": "keyword" }`. The response is a retrieval trace: `trace_id`, original `question`, `corpus`, an ordered `searches` list, combined `selected_evidence`, turn `timings_ms` (`rewrite`, `retrieval`), `rewrite`, and `generation`. Each search has its actual `query`, `mode`, `filters`, `models`, effective `settings`, ranked `stages`, its own `selected_evidence`, and stage `timings_ms`. Each card has stable `card_id`, `name`, complete `text`, `mana_cost`, numeric `mana_value`, `colors`, `type_line`, `rank`, and raw `score`. Branch, fused, and reranked stages preserve canonical card identity. `GET /api/health` reports SQLite/extension versions, support, and corpus information.
 
 See [saved conversations](conversations.md) for local history, reopening original evidence, deletion, and the optional search `conversation_id`.
 

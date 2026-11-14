@@ -29,38 +29,37 @@ def timestamp():
     return datetime.now(timezone.utc).isoformat()
 
 
+# Version 2 saves an ordered list of searches per turn. Earlier single-query
+# turns are not migrated: conversations are wiped once when this version first
+# opens a database. Card data, embeddings, and corpus tables are never touched.
+STORAGE_VERSION = 2
+
+
 class ConversationStore:
     def __init__(self, connection):
         self.connection = connection
         with self.connection() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS conversations (
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("CREATE TABLE IF NOT EXISTS conversation_storage (version INTEGER NOT NULL)")
+            stored = db.execute("SELECT max(version) FROM conversation_storage").fetchone()[0]
+            if stored is None or stored < STORAGE_VERSION:
+                db.execute("DROP TABLE IF EXISTS conversation_turns")
+                db.execute("DROP TABLE IF EXISTS conversations")
+                db.execute("DELETE FROM conversation_storage")
+                db.execute("INSERT INTO conversation_storage VALUES (?)", (STORAGE_VERSION,))
+            db.execute("""CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY, title TEXT NOT NULL,
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS conversation_turns (
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    current_filters TEXT NOT NULL DEFAULT '{}',
+                    current_mode TEXT NOT NULL DEFAULT 'keyword')""")
+            db.execute("""CREATE TABLE IF NOT EXISTS conversation_turns (
                     id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
                     question TEXT NOT NULL, state TEXT NOT NULL,
                     trace TEXT NOT NULL, answer TEXT, error TEXT,
                     created_at TEXT NOT NULL,
-                    FOREIGN KEY(conversation_id) REFERENCES conversations(id));
-                CREATE INDEX IF NOT EXISTS turns_by_conversation
-                    ON conversation_turns(conversation_id, created_at);
-            """)
-            db.execute('BEGIN IMMEDIATE')
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(conversations)")}
-            if "current_filters" not in columns:
-                db.execute("ALTER TABLE conversations ADD COLUMN current_filters TEXT")
-                for row in db.execute("SELECT id FROM conversations").fetchall():
-                    latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
-                    filters = json.loads(latest["trace"]).get("filters", {}) if latest else {}
-                    db.execute("UPDATE conversations SET current_filters = ? WHERE id = ?", (json.dumps(filters), row["id"]))
-            if "current_mode" not in columns:
-                db.execute("ALTER TABLE conversations ADD COLUMN current_mode TEXT NOT NULL DEFAULT 'keyword'")
-                for row in db.execute("SELECT id FROM conversations").fetchall():
-                    latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
-                    mode = json.loads(latest["trace"]).get("mode", "keyword") if latest else "keyword"
-                    if mode in ('keyword', 'vector', 'hybrid', 'hybrid_rerank'):
-                        db.execute("UPDATE conversations SET current_mode = ? WHERE id = ?", (mode, row["id"]))
+                    FOREIGN KEY(conversation_id) REFERENCES conversations(id))""")
+            db.execute("""CREATE INDEX IF NOT EXISTS turns_by_conversation
+                    ON conversation_turns(conversation_id, created_at)""")
 
     def create(self):
         now = timestamp()

@@ -19,7 +19,7 @@ class RewritePayload(BaseModel):
 def conversation_context(turns):
     context = []
     for turn in turns[-CONTEXT_TURN_LIMIT:]:
-        item = {"question": turn["question"], "query": turn["trace"]["query"]}
+        item = {"question": turn["question"], "query": "; ".join(search["query"] for search in turn["trace"]["searches"])}
         if turn["state"] == "completed" and turn.get("answer"):
             item["answer"] = turn["answer"]
         if turn["state"] == "completed":

@@ -202,7 +202,8 @@ def repair_images(connection, source):
             for row in db.execute('SELECT id, trace FROM conversation_turns').fetchall():
                 trace = json.loads(row['trace'])
                 changed = False
-                for cards in [trace.get('selected_evidence', []), *trace.get('stages', {}).values(), trace.get('generation', {}).get('assets', [])]:
+                searches = trace.get('searches', [])
+                for cards in [trace.get('selected_evidence', []), *(search.get('selected_evidence', []) for search in searches), *(cards for search in searches for cards in search.get('stages', {}).values()), trace.get('generation', {}).get('assets', [])]:
                     for card in cards:
                         changed = fill(card) or changed
                 if changed:
