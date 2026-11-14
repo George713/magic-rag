@@ -8,7 +8,22 @@ Answers receive the original user question, actual retrieval query, and a frozen
 
 ## Provider prerequisite
 
-Checked 2026-10-25: [OpenCode Go's workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) requests typical coding-agent traffic. Magic card Q&A suitability is unresolved. The [inference API](https://opencode.ai/v2/docs/console/api/inference/) documents compatible HTTP interfaces, but this does not establish workload suitability. No Go generation request was sent, no paid alternative was selected, and no live-provider smoke test was run. Confirm suitability with the provider before enabling requests.
+Checked 2026-10-25: [OpenCode Go's workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) requests typical coding-agent traffic. The [inference API](https://opencode.ai/v2/docs/console/api/inference/) documents compatible HTTP interfaces, but this does not establish workload suitability. The maintainer set `MAGIC_RAG_PROVIDER_SUITABILITY_CONFIRMED` locally; that flag records the maintainer's decision and is not provider approval.
+
+### Live tool-calling smoke test
+
+`scripts/smoke_provider_tool_calls.py` is a manual check outside the automated suite. It reads the `MAGIC_RAG_PROVIDER_*` variables from the repository `.env` (process environment overrides; `--env-file` selects another file). It refuses to run, exit code 2, unless the suitability flag is `true`. It then sends one tool-calling request through LangChain's `ChatOpenAI` with a single `search_cards(query: str)` tool, repeats it as a streamed request, and reports whether each returns a well-formed `search_cards` call with a non-empty `query` string and a call ID. Credentials are never printed. The application's full chat-completions URL is converted to the API base LangChain expects by removing the `/chat/completions` suffix.
+
+```powershell
+uv run python scripts/smoke_provider_tool_calls.py            # add --no-stream to skip the streamed check
+```
+
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go:
+
+- **Outcome: tool calls work.** On two consecutive runs, both the non-streamed and streamed requests returned exactly one `search_cards` call with `finish_reason='tool_calls'`, a call ID, and a model-written query (for example `{"query": "red instant deal 3 damage to creature"}`) for the question "a red instant that deals 3 damage to a creature".
+- **Streaming:** Streamed tool-call chunks (6–7 per response) merged into a complete, parseable call with no `invalid_tool_calls`.
+- **Quirk: session header required.** Requests without an `x-opencode-session` header fail with HTTP 400 ("Request is missing x-opencode-session and cannot be routed efficiently"). Go's client guidance asks clients to send a stable session ID per conversation and an application-specific user agent. The script sends a fresh UUID per run and `User-Agent: magic-rag/0.1`. The application adapter must send the same headers, with one session ID per conversation.
+- The model chose to call the tool without `tool_choice` forcing. Answer quality and citation behavior were not tested.
 
 ## Server configuration
 
