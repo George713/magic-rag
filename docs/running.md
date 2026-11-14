@@ -38,7 +38,7 @@ npm test
 
 API tests use real isolated SQLite databases at the confirmed FastAPI seam. The browser test starts both processes with an isolated database and checks submitted queries, complete two-face evidence, corpus provenance, and no matches. Browser tests reserve ports 8001 and 5173. Tests never modify the default database. Generated databases, browser reports, dependencies, credentials, and caches are ignored.
 
-Validated on Windows with CPython 3.11.4, SQLite FTS5/sqlite-vec, Node 22.23.2, and Chromium. Model and full-corpus checks are recorded in their guides; live remote-provider support remains unverified. Dedicated browser fixture configurations for vector/hybrid/reranking/filters/streaming/rewriting are documented with those workflows.
+Validated on Windows with CPython 3.11.4, SQLite FTS5/sqlite-vec, Node 22.23.2, and Chromium. Model and full-corpus checks are recorded in their guides; live provider checks are recorded in the [provider guide](providers.md). Dedicated browser fixture configurations for vector/hybrid/reranking/filters/streaming/rewriting are documented with those workflows.
 
 ## Retrieval contract
 

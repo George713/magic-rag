@@ -250,9 +250,8 @@ def test_import_does_not_expose_non_https_image_or_source_urls(tmp_path):
 
 
 def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restart(tmp_path):
-    class AssetProvider:
-        async def stream_answer(self, question, evidence, session_id, **kwargs):
-            yield {"result": {"assets": [evidence[0]["card_id"]]}}
+    from scripted_chat_model import ScriptedChatModel
+    model = ScriptedChatModel(script=[lambda call: {"assets": [call.source["selected_evidence"][0]["card_id"]]}])
 
     source = FixtureSource()
     metadata, records = source.snapshot()
@@ -260,7 +259,7 @@ def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restar
     records[0]["card_faces"][1]["image_uris"] = {"normal": "https://cards.example/back.jpg"}
     source.snapshot = lambda: (metadata, records)
     path = tmp_path / "assets.db"
-    with TestClient(create_app(path, embedder=ControlledEmbedder(), provider=AssetProvider(), corpus_source=source)) as client:
+    with TestClient(create_app(path, embedder=ControlledEmbedder(), chat_model=model, corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation_id = client.post("/api/conversations").json()["id"]
         trace = client.post("/api/search", json={"question": "Final ability", "conversation_id": conversation_id}).json()

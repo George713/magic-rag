@@ -73,7 +73,7 @@ PR #28 subsequently merged first on 2026-10-26, bringing PR #24's application ch
 
 ## Verification boundaries
 
-FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source, and provider substitutes. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks do not establish live OpenCode Go support. Workload suitability and credentials remain unresolved; no live model request or paid fallback is used.
+FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source substitutes and a scripted chat model. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks make no live model request; live checks are recorded in the [provider guide](providers.md).
 
 API coverage is in `backend/tests/test_conversations.py`, `test_filters.py`, `test_corpus.py`, `test_generation.py`, `test_streaming.py`, and `test_answer_context.py`. Browser verification and acceptance assessment are recorded below after integration.
 

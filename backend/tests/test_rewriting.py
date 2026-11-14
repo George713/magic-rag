@@ -5,6 +5,7 @@ import pytest
 
 from magic_rag.app import create_app, connect
 from magic_rag.vectors import store_vectors
+from scripted_chat_model import ScriptedChatModel
 
 
 INITIAL = "Find artifact-sacrifice creatures"
@@ -44,16 +45,19 @@ def seed_artifact_cards(path):
         store_vectors(db, [(card[0], f"{card[1]} {card[2]}") for card in cards], TopicEmbedder())
 
 
-class TopicProvider:
-    async def rewrite(self, question, history, session_id):
+def is_rewrite(call):
+    return "history" in call.source
+
+
+def topic_model(call):
+    if is_rewrite(call):
+        history = call.source["history"]
         assert history[-1]["question"] == INITIAL
         assert history[-1]["query"] == INITIAL
         assert "selected_evidence" not in history[-1]
         return {"query": STANDALONE}
-
-    def answer(self, question, evidence, session_id, *, context=None):
-        assert question == FOLLOWUP
-        return {"text": "Atog sacrifices artifacts.", "citations": [ATOG], "insufficient_evidence": False}
+    assert call.source["question"] == FOLLOWUP
+    return {"text": "Atog sacrifices artifacts.", "citations": [ATOG], "insufficient_evidence": False}
 
 
 @pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid", "hybrid_rerank"])
@@ -61,7 +65,7 @@ def test_followup_uses_standalone_topic_in_every_stage_and_retains_filters(tmp_p
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
     filters = {"card_types": ["Creature"], "mana_value_max": 2}
-    with TestClient(create_app(path, embedder=TopicEmbedder(), reranker=TopicReranker(), provider=TopicProvider())) as client:
+    with TestClient(create_app(path, embedder=TopicEmbedder(), reranker=TopicReranker(), chat_model=ScriptedChatModel(script=topic_model))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         initial = client.post("/api/search", json={"question": INITIAL, "mode": mode, "conversation_id": conversation_id, "filters": filters}).json()
         response = client.post("/api/search", json={"question": FOLLOWUP, "mode": mode, "conversation_id": conversation_id, "generate_answer": True})
@@ -79,47 +83,34 @@ def test_followup_uses_standalone_topic_in_every_stage_and_retains_filters(tmp_p
         assert saved[1]["trace"] == trace
 
 
-def test_production_rewrite_adapter_sends_conversation_context_in_a_separate_call(tmp_path):
-    import httpx
-    from magic_rag.providers import ChatCompletionsProvider, ProviderConfig
-
+def test_rewrite_sends_conversation_context_in_a_separate_call_with_the_conversation_session(tmp_path):
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    sessions = []
 
-    def remote(request):
-        sessions.append(request.headers["x-opencode-session"])
-        assert request.headers["Authorization"] == "Bearer private-key"
-        body = json.loads(request.content)
-        source = json.loads(body["messages"][1]["content"])
-        assert source["question"] == FOLLOWUP
-        assert source["history"] == [{"question": INITIAL, "query": INITIAL}]
-        assert "selected_evidence" not in source
-        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"query": STANDALONE})}}]})
+    def rewrite(call):
+        assert call.source["question"] == FOLLOWUP
+        assert call.source["history"] == [{"question": INITIAL, "query": INITIAL}]
+        assert "selected_evidence" not in call.source
+        return {"query": STANDALONE}
 
-    provider = ChatCompletionsProvider(ProviderConfig("https://provider.example/chat/completions", "configured-model", "private-key", True), transport=httpx.MockTransport(remote))
-    with TestClient(create_app(path, provider=provider)) as client:
+    model = ScriptedChatModel(script=[rewrite])
+    with TestClient(create_app(path, chat_model=model)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id})
         response = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id})
         assert response.json()["searches"][0]["query"] == STANDALONE
         assert response.json()["rewrite"]["status"] == "rewritten"
-        assert sessions == [conversation_id]
-        assert "private-key" not in response.text
+        assert [call.session for call in model.calls] == [conversation_id]
+        assert model.calls[0].kwargs["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.parametrize("payload", [None, {"query": ""}, {"query": "???"}, {"query": 12},
                                     {"query": STANDALONE, "filters": {}}, "provider failure"])
 def test_rewrite_failure_searches_exact_submitted_text_under_retained_filters(tmp_path, payload):
-    class FailedRewrite:
-        async def rewrite(self, question, history, session_id):
-            if payload == "provider failure":
-                raise RuntimeError("private-provider-key-and-endpoint")
-            return payload
-
+    step = RuntimeError("private-provider-key-and-endpoint") if payload == "provider failure" else json.dumps(payload)
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, provider=FailedRewrite())) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[step]))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id, "filters": {"colors": ["R"]}})
         original = "  Any cheaper ones?  "
@@ -154,13 +145,12 @@ def test_absent_provider_retains_filters_and_explicit_empty_object_clears_them(t
 
 
 def test_history_is_isolated_between_conversations(tmp_path):
-    class IsolatedProvider:
-        async def rewrite(self, question, history, session_id):
-            return {"query": history[-1]["query"] + " " + question}
+    def isolated(call):
+        return {"query": call.source["history"][-1]["query"] + " " + call.source["question"]}
 
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, provider=IsolatedProvider())) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=isolated))) as client:
         first = client.post("/api/conversations").json()["id"]
         second = client.post("/api/conversations").json()["id"]
         client.post("/api/search", json={"question": INITIAL, "conversation_id": first, "filters": {"colors": ["R"]}})
@@ -174,45 +164,42 @@ def test_history_is_isolated_between_conversations(tmp_path):
         assert INITIAL not in followup["searches"][0]["query"]
 
 
-def test_unconfirmed_workload_never_sends_a_rewrite_request(tmp_path):
-    import httpx
-    from magic_rag.providers import ChatCompletionsProvider, ProviderConfig
-    requests = []
-
-    def remote(request):
-        requests.append(request)
-        return httpx.Response(500)
-
-    provider = ChatCompletionsProvider(ProviderConfig("https://provider.example/chat/completions", "model", "private-key", False), transport=httpx.MockTransport(remote))
-    with TestClient(create_app(tmp_path / "cards.db", provider=provider)) as client:
+def test_unconfirmed_workload_never_sends_a_rewrite_request(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGIC_RAG_PROVIDER_URL", "https://provider.example/chat/completions")
+    monkeypatch.setenv("MAGIC_RAG_PROVIDER_MODEL", "model")
+    monkeypatch.setenv("MAGIC_RAG_PROVIDER_API_KEY", "private-key")
+    monkeypatch.delenv("MAGIC_RAG_PROVIDER_SUITABILITY_CONFIRMED", raising=False)
+    with TestClient(create_app(tmp_path / "cards.db")) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id})
-        followup = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id}).json()
-        assert followup["rewrite"]["status"] == "unavailable"
-        assert followup["searches"][0]["query"] == FOLLOWUP
-        assert requests == []
+        followup = client.post("/api/search", json={"question": FOLLOWUP, "conversation_id": conversation_id})
+        assert followup.json()["rewrite"]["status"] == "unavailable"
+        assert followup.json()["searches"][0]["query"] == FOLLOWUP
+        assert "private-key" not in followup.text
 
 
 def test_rewrite_context_includes_completed_answers_but_omits_failed_partial_output(tmp_path):
-    class ContextProvider:
-        async def rewrite(self, question, history, session_id):
+    async def failed_stream(call):
+        yield '{"text": "Unfinished unverified thought'
+        raise RuntimeError("Controlled failed stream")
+
+    def context_model(call):
+        question = call.source["question"]
+        if is_rewrite(call):
+            history = call.source["history"]
             assert "answer" not in history[0]
             if question == FOLLOWUP:
                 assert history[1]["answer"] == "Atog sacrifices artifacts."
                 assert all("selected_evidence" not in item for item in history)
             return {"query": STANDALONE if question == FOLLOWUP else question}
-
-        async def stream_answer(self, question, evidence, session_id, *, context=None):
-            if question == INITIAL:
-                yield {"delta": "Unfinished unverified thought"}
-                raise RuntimeError("Controlled failed stream")
-            assert question == "Atog"
-            yield {"delta": "Atog sacrifices artifacts."}
-            yield {"result": {"text": "Atog sacrifices artifacts.", "citations": [ATOG], "insufficient_evidence": False}}
+        if question == INITIAL:
+            return failed_stream(call)
+        assert question == "Atog"
+        return {"text": "Atog sacrifices artifacts.", "citations": [ATOG], "insufficient_evidence": False}
 
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, provider=ContextProvider())) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=context_model))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         first = client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id}).json()
         failed = client.post(f'/api/conversations/{conversation_id}/turns/{first["turn_id"]}/stream')

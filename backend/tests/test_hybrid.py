@@ -58,12 +58,13 @@ def test_saved_hybrid_turn_and_provider_share_the_same_limited_evidence(tmp_path
     path = tmp_path / "cards.db"
     model = ControlledEmbedder()
     ingest_sample(path, embedder=model)
-    class EvidenceProvider:
-        def answer(self, question, evidence, session_id, *, context=None):
-            assert len(evidence) == 1
-            assert evidence[0]["card_id"] == "sample-sol-ring"
-            return {"text":"This card produces mana.", "citations":["sample-sol-ring"], "insufficient_evidence":False}
-    with TestClient(create_app(path, embedder=model, provider=EvidenceProvider())) as client:
+    from scripted_chat_model import ScriptedChatModel
+    def answer(call):
+        evidence = call.source["selected_evidence"]
+        assert len(evidence) == 1
+        assert evidence[0]["card_id"] == "sample-sol-ring"
+        return {"text":"This card produces mana.", "citations":["sample-sol-ring"], "insufficient_evidence":False}
+    with TestClient(create_app(path, embedder=model, chat_model=ScriptedChatModel(script=[answer]))) as client:
         conversation = client.post("/api/conversations").json()
         trace = client.post("/api/search", json={"question":"Sol Ring", "mode":"hybrid", "generate_answer":True,
             "conversation_id":conversation["id"], "settings":{"evidence_limit":1}}).json()
