@@ -88,12 +88,13 @@ test('failed images keep selected asset names and evidence readable',async({page
  await expandEvidence(page);await expect(page.locator('.card-text')).toContainText('Flying');
  await page.getByText('Retrieval details',{exact:true}).click();await expect(page.getByTestId('actual-query')).toHaveText('Delver assets only');
 });
-test('Stop and provider failure retain incomplete output and permit subsequent turns',async({page})=>{
+test('Stop removes the message, provider failure keeps it as failed, and subsequent turns work',async({page})=>{
  await page.goto('/');await send(page,'Delver stop');await expect(page.getByTestId('answer-text')).toHaveText('The transformed ');
- await page.getByRole('button',{name:'Stop answer'}).click();await expect(page.getByTestId('generation-status')).toContainText('stopped');
+ await page.getByRole('button',{name:'Stop answer'}).click();await expect(page.locator('.turn')).toHaveCount(0);
  await send(page,'Delver fail');await expect(page.locator('.turn').last().getByTestId('generation-status')).toContainText('failed');
+ await expect(page.locator('.turn')).toHaveCount(1);
  await expandEvidence(page);await expect(page.locator('.turn').last().locator('.card-text')).toContainText('Flying');
- await page.reload();await expect(page.getByTestId('answer-text')).toHaveCount(2);
+ await page.reload();await expect(page.getByTestId('answer-text')).toHaveCount(1);
 });
 test('ordinary source image and legacy asset without imagery remain usable',async({page})=>{
  await page.goto('/');await send(page,'Lightning Bolt assets only');

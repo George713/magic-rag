@@ -30,11 +30,11 @@ def timestamp():
 
 
 IN_PROGRESS_STATUSES = {"searching", "generating"}
-TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+TERMINAL_STATUSES = {"completed", "failed"}
 
 
 def turn_state(generation):
-    """A turn is in progress until it completes or fails (or, until Stop changes, is cancelled).
+    """A turn is in progress until it completes or fails. A stopped run is deleted, never saved.
 
     A run without a ready provider completes after its search; its generation keeps the provider status.
     """
@@ -151,28 +151,43 @@ class ConversationStore:
                 return turn
         raise HTTPException(404, "Conversation turn not found.")
 
-    def recover_interrupted_turns(self):
+    def delete_turn(self, conversation_id, turn_id, *, expected_states=None):
+        """Remove a turn and everything saved with it; returns whether it was removed.
+
+        With `expected_states`, only a turn in one of those states is removed (compare-and-delete).
+        A conversation left without turns gets its default title back, so no trace of the turn remains.
+        """
         with self.connection() as db:
-            interrupted = db.execute("SELECT conversation_id, id, trace FROM conversation_turns WHERE state = 'in_progress'").fetchall()
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT state FROM conversation_turns WHERE id = ? AND conversation_id = ?", (turn_id, conversation_id)).fetchone()
+            if row is None or (expected_states is not None and row["state"] not in expected_states):
+                return False
+            db.execute("DELETE FROM conversation_turns WHERE id = ?", (turn_id,))
+            db.execute("""UPDATE conversations SET updated_at = ?, title = CASE WHEN EXISTS (
+                    SELECT 1 FROM conversation_turns WHERE conversation_id = ?) THEN title ELSE 'New conversation' END
+                    WHERE id = ?""", (timestamp(), conversation_id, conversation_id))
+            return True
+
+    def remove_interrupted_turns(self):
+        """Runs cut off by a shutdown are stopped runs: nothing from them is kept."""
+        with self.connection() as db:
+            interrupted = db.execute("SELECT conversation_id, id FROM conversation_turns WHERE state = 'in_progress'").fetchall()
         for row in interrupted:
-            generation = json.loads(row["trace"])["generation"]
-            self.update_generation(row["conversation_id"], row["id"],
-                {**generation, "status": "cancelled", "message": "Generation was interrupted by service shutdown. Partial output is incomplete.", "citations": []}, expected_states={"in_progress"})
+            self.delete_turn(row["conversation_id"], row["id"], expected_states={"in_progress"})
 
     def update_generation(self, conversation_id, turn_id, generation, *, expected_states):
         return self.update_trace(conversation_id, turn_id, lambda trace: {**trace, "generation": generation}, expected_states=expected_states)
 
     def update_trace(self, conversation_id, turn_id, change, *, expected_states):
-        """Compare-and-set prevents late searches, deltas, or completion from overwriting terminal turn states.
+        """Compare-and-set prevents late searches, deltas, or completion from overwriting terminal or deleted turns.
 
         `change` maps the saved trace to its replacement; the turn state follows the new generation.
         """
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT state, trace FROM conversation_turns WHERE id = ? AND conversation_id = ?", (turn_id, conversation_id)).fetchone()
-            if row is None:
-                raise HTTPException(404, "Conversation turn not found.")
-            if row["state"] not in expected_states:
+            if row is None or row["state"] not in expected_states:
+                # A Stop may delete the turn while its run is still writing.
                 return False
             trace = change(json.loads(row["trace"]))
             generation = trace["generation"]

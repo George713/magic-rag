@@ -5,7 +5,7 @@ export type MessageEvent =
  | {event: 'start'; trace: Trace}
  | {event: 'search'; index: number; query: string; card_count: number; top_cards: {card_id: string; name: string}[]; search: Search; selected_evidence: Card[]}
  | {event: 'delta'; text: string}
- | {event: 'done'; generation: Generation; trace: Trace};
+ | {event: 'done'; generation: Generation; trace: Trace | null};
 
 export interface MessageRequest {question: string; mode: string; settings: Record<string, number>; filters: unknown}
 
@@ -13,10 +13,16 @@ export function cancelPath(trace: Trace) {
  return `/api/conversations/${encodeURIComponent(trace.conversation_id!)}/turns/${encodeURIComponent(trace.turn_id!)}/cancel`;
 }
 
+/** A run stopped elsewhere ends with `done` and no saved turn: the service deleted it. */
+export function removed(trace: Trace) {
+ return trace.generation.status === 'cancelled';
+}
+
 /** The turn as known after one more event; `done` carries the saved turn, which is authoritative. */
 export function applyEvent(trace: Trace | null, event: MessageEvent): Trace {
- if (event.event === 'start' || event.event === 'done') return event.trace;
+ if (event.event === 'start') return event.trace;
  if (!trace) throw new Error('The message stream did not start with its turn.');
+ if (event.event === 'done') return event.trace ?? {...trace, generation: event.generation};
  if (event.event === 'search') {
   const searches = [...trace.searches]; searches[event.index] = event.search;
   // The service owns the combined evidence (deduplicated, capped union of the searches so far).

@@ -104,10 +104,11 @@ def test_failed_or_cancelled_generation_does_not_supply_shown_card_context(tmp_p
     with TestClient(create_app(path, chat_model=ScriptedChatModel(script=searching(unvalidated, query=lambda call: "Atog")))) as client:
         conversation = client.post("/api/conversations").json()["id"]
         client.post(f"/api/conversations/{conversation}/messages", json={"question":"Atog"})
-        saved = client.get(f"/api/conversations/{conversation}").json()["turns"][0]
-        assert saved["state"] == ("cancelled" if cancelled else "failed")
+        turns = client.get(f"/api/conversations/{conversation}").json()["turns"]
+        # A cancelled run is a stopped run: its turn is removed, so it supplies no context at all.
+        assert [turn["state"] for turn in turns] == ([] if cancelled else ["failed"])
         followup = client.post("/api/search", json={"question":"Those cards?", "conversation_id":conversation}).json()
-        assert followup["answer_context"]["conversation_context"] == [{"question":"Atog", "query":"Atog"}]
+        assert followup["answer_context"]["conversation_context"] == ([] if cancelled else [{"question":"Atog", "query":"Atog"}])
 
 
 def test_selected_asset_names_share_existing_context_character_and_history_limits(tmp_path):
