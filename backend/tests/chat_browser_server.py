@@ -6,7 +6,7 @@ from pathlib import Path
 import uvicorn
 from magic_rag.app import create_app, connect
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
+from scripted_chat_model import ScriptedChatModel, offers_tools, search_call, search_once
 
 def chat_model(call):
     source = call.source
@@ -41,4 +41,4 @@ if __name__ == "__main__":
         db.execute("INSERT OR REPLACE INTO card_images VALUES (?, ?, ?)",("sample-lightning-bolt",json.dumps([
             {"name":"Lightning Bolt","url":"https://cards.test/bolt.jpg"}
         ]),"https://cards.test/bolt"))
-    uvicorn.run(create_app(path,chat_model=ScriptedChatModel(script=chat_model)),host="127.0.0.1",port=8131)
+    uvicorn.run(create_app(path,chat_model=ScriptedChatModel(script=search_once(chat_model))),host="127.0.0.1",port=8131)

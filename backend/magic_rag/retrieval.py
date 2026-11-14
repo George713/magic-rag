@@ -18,13 +18,25 @@ def fuse(branches: dict[str, list[dict]], rank_constant: int = 60, *, query: str
     return [{**card, "rank": rank} for rank, card in enumerate(ordered, 1)]
 
 
+EVIDENCE_CAP_FACTOR = 2
+
+
 def combined_evidence(searches):
-    """Evidence for an answer is every search's selected cards, first occurrence wins."""
+    """Evidence for an answer: the union of every search's selected cards, deduplicated by card.
+
+    Cards are taken by rank across searches (every search's best card, then every second-best, ...),
+    first occurrence wins, up to a total cap of `EVIDENCE_CAP_FACTOR` times the per-search evidence
+    limit, so each search keeps its best cards and the answer request stays bounded.
+    """
+    if not searches:
+        return []
+    cap = EVIDENCE_CAP_FACTOR * max(search["settings"]["evidence_limit"] for search in searches)
     seen = set()
     evidence = []
-    for search in searches:
-        for card in search["selected_evidence"]:
-            if card["card_id"] not in seen:
-                seen.add(card["card_id"])
-                evidence.append(card)
+    for rank in range(max(len(search["selected_evidence"]) for search in searches)):
+        for search in searches:
+            cards = search["selected_evidence"]
+            if rank < len(cards) and cards[rank]["card_id"] not in seen and len(evidence) < cap:
+                seen.add(cards[rank]["card_id"])
+                evidence.append(cards[rank])
     return evidence

@@ -115,8 +115,26 @@ def offers_tools(call):
     return bool(call.kwargs.get("tools"))
 
 
+DONE_SEARCHING = "Done searching."
+"""A scripted agent turn without tool calls: the model stops searching, and the answer call follows."""
+
+
+def has_searched(call):
+    """Whether this message's searches already ran (the model call carries tool results)."""
+    return any(message.type == "tool" for message in call.messages)
+
+
+def search_once(responder):
+    """Wrap a responder so each message searches once: later tool-offering calls stop searching."""
+    def respond(call):
+        if offers_tools(call) and has_searched(call):
+            return DONE_SEARCHING
+        return responder(call)
+    return respond
+
+
 def searching(answer, query=None):
-    """A responder for any number of messages: search (`query(call)`, default the typed question), then answer.
+    """A responder for any number of messages: search once (`query(call)`, default the typed question), then answer.
 
     `answer` is a scripted step (or a responder) for the answer call.
     """
@@ -124,4 +142,4 @@ def searching(answer, query=None):
         if offers_tools(call):
             return search_call(query(call) if query else call.source["question"])
         return answer
-    return respond
+    return search_once(respond)

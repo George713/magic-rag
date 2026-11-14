@@ -6,7 +6,7 @@ import pytest
 
 from magic_rag.app import create_app
 from artifact_cards import ATOG, FOLLOWUP, INITIAL, STANDALONE, TopicEmbedder, TopicReranker, seed_artifact_cards
-from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
+from scripted_chat_model import DONE_SEARCHING, search_once, ScriptedChatModel, offers_tools, search_call
 from test_streaming import send_message
 
 
@@ -25,7 +25,7 @@ def test_followup_search_uses_the_model_written_topic_in_every_stage_and_keeps_f
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
     filters = {"card_types": ["Creature"], "mana_value_max": 2}
-    model = ScriptedChatModel(script=topic_model)
+    model = ScriptedChatModel(script=search_once(topic_model))
     with TestClient(create_app(path, embedder=TopicEmbedder(), reranker=TopicReranker(), chat_model=model)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         initial = send_message(client, conversation_id, INITIAL, mode=mode, filters=filters)[-1]["trace"]
@@ -38,9 +38,9 @@ def test_followup_search_uses_the_model_written_topic_in_every_stage_and_keeps_f
         assert trace["selected_evidence"][0]["card_id"] == ATOG
         assert trace["generation"]["status"] == "completed"
         assert "rewrite" not in trace
-        # One choice of search, then the answer: no separate rewrite request.
+        # The agent searches, stops searching, then the answer: no separate rewrite request.
         followup_calls = model.calls[calls_before:]
-        assert [offers_tools(call) for call in followup_calls] == [True, False]
+        assert [offers_tools(call) for call in followup_calls] == [True, True, False]
         assert {call.session for call in followup_calls} == {conversation_id}
         saved = client.get(f"/api/conversations/{conversation_id}").json()["turns"]
         assert saved[0]["trace"] == initial and saved[1]["trace"] == trace
@@ -49,7 +49,7 @@ def test_followup_search_uses_the_model_written_topic_in_every_stage_and_keeps_f
 def test_a_provider_failure_while_choosing_the_search_fails_the_turn_without_exposing_details(tmp_path):
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    model = ScriptedChatModel(script=[RuntimeError("private-provider-key-and-endpoint"), search_call("Atog"),
+    model = ScriptedChatModel(script=[RuntimeError("private-provider-key-and-endpoint"), search_call("Atog"), DONE_SEARCHING,
                                       {"text": "Atog sacrifices artifacts.", "citations": [ATOG]}])
     with TestClient(create_app(path, chat_model=model)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
@@ -91,7 +91,7 @@ def test_context_and_filters_are_isolated_between_conversations(tmp_path):
 
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=search_once(model)))) as client:
         first = client.post("/api/conversations").json()["id"]
         second = client.post("/api/conversations").json()["id"]
         send_message(client, first, INITIAL, filters={"colors": ["R"]})

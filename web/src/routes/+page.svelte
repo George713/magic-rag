@@ -65,7 +65,7 @@
     {@const prefix=`turn-${trace.turn_id || trace.trace_id}`}
     <section class="turn" aria-label={`Turn: ${trace.question}`}>
      <div class="question"><span class="speaker">YOU</span><p>{trace.question}</p></div>
-     <div class="response"><span class="speaker">MAGIC RAG</span><SearchLines searches={trace.searches}/><Answer generation={trace.generation} {prefix}/>{#if trace.searches.length}<TurnEvidence {trace} {prefix}/>{/if}</div>
+     <div class="response"><span class="speaker">MAGIC RAG</span><SearchLines {trace} {prefix}/><Answer generation={trace.generation} {prefix}/>{#if trace.searches.length}<TurnEvidence {trace} {prefix}/>{/if}</div>
     </section>
    {/each}
   </div>

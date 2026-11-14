@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from magic_rag.app import create_app
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
+from scripted_chat_model import DONE_SEARCHING, search_once, ScriptedChatModel, offers_tools, search_call
 from test_streaming import send_message
 
 DELVER = "sample-delver"
@@ -15,7 +15,7 @@ def test_first_turn_question_is_searched_with_the_model_written_query_and_answer
     path = tmp_path / "cards.db"
     ingest_sample(path)
     answer = {"text": "It transforms into a flier.", "citations": [DELVER], "insufficient_evidence": False}
-    model = ScriptedChatModel(script=[search_call(" Delver of Secrets "), answer])
+    model = ScriptedChatModel(script=[search_call(" Delver of Secrets "), DONE_SEARCHING, answer])
     with TestClient(create_app(path, chat_model=model)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         events = send_message(client, conversation_id, "which blue one-drop flips into a flier?")
@@ -50,7 +50,7 @@ def test_explicit_filters_and_search_mode_apply_to_the_agents_search_and_the_mod
         answers.append(call)
         return {"text": "Only a blue card matched.", "citations": ["sample-lightning-bolt"], "insufficient_evidence": False}
 
-    with TestClient(create_app(path, embedder=ControlledEmbedder(), chat_model=ScriptedChatModel(script=model))) as client:
+    with TestClient(create_app(path, embedder=ControlledEmbedder(), chat_model=ScriptedChatModel(script=search_once(model)))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         first = send_message(client, conversation_id, "the red burn spell", mode="hybrid", filters={"colors": ["U"]})
         second = send_message(client, conversation_id, "the red burn spell again")
@@ -77,7 +77,7 @@ def test_long_card_text_arrives_complete_in_the_search_and_the_answer_evidence(t
     long_text = "Flying\n" + "\n".join(f"Ability {index}: draw a card." for index in range(2000)) + "\nFinal ability: you win the game."
     with connect(path) as db:
         db.execute("UPDATE cards SET text = ? WHERE card_id = ?", (long_text, DELVER))
-    model = ScriptedChatModel(script=[search_call("Delver"), lambda call: {
+    model = ScriptedChatModel(script=[search_call("Delver"), DONE_SEARCHING, lambda call: {
         "text": "It has many abilities.", "citations": [DELVER], "insufficient_evidence": False}])
     with TestClient(create_app(path, chat_model=model)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
@@ -125,7 +125,7 @@ def test_followups_receive_bounded_context_from_earlier_turns_and_the_model_reso
         card = call.source["selected_evidence"][0]
         return {"text": f"About {card['name']}.", "citations": [card["card_id"]], "insufficient_evidence": False}
 
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=search_once(model)))) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         assert send_message(client, conversation_id, "Delver")[-1]["generation"]["status"] == "completed"
         assert contexts[-1] == []
@@ -151,7 +151,7 @@ def test_out_of_scope_requests_are_declined_under_instructions_that_name_the_sco
     path = tmp_path / "cards.db"
     ingest_sample(path)
     decline = {"text": "Deck building is out of scope; I can explain Lightning Bolt instead.", "citations": [], "insufficient_evidence": True}
-    model = ScriptedChatModel(script=[search_call("Lightning Bolt"), decline])
+    model = ScriptedChatModel(script=[search_call("Lightning Bolt"), DONE_SEARCHING, decline])
     with TestClient(create_app(path, chat_model=model)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
         done = send_message(client, conversation_id, "Build me the best burn deck around Lightning Bolt")[-1]

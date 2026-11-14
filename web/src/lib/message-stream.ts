@@ -1,9 +1,9 @@
 import type { Card, Generation, Search, Trace } from '$lib/types';
 
-/** Newline-delimited events of one streamed message; `search` repeats once per completed search. */
+/** Newline-delimited events of one streamed message; `search` repeats once per completed search and carries the combined evidence so far. */
 export type MessageEvent =
  | {event: 'start'; trace: Trace}
- | {event: 'search'; index: number; query: string; card_count: number; top_cards: {card_id: string; name: string}[]; search: Search}
+ | {event: 'search'; index: number; query: string; card_count: number; top_cards: {card_id: string; name: string}[]; search: Search; selected_evidence: Card[]}
  | {event: 'delta'; text: string}
  | {event: 'done'; generation: Generation; trace: Trace};
 
@@ -13,18 +13,14 @@ export function cancelPath(trace: Trace) {
  return `/api/conversations/${encodeURIComponent(trace.conversation_id!)}/turns/${encodeURIComponent(trace.turn_id!)}/cancel`;
 }
 
-function combined(searches: Search[]): Card[] {
- const seen = new Set<string>();
- return searches.flatMap(search => search.selected_evidence).filter(card => !seen.has(card.card_id) && !!seen.add(card.card_id));
-}
-
 /** The turn as known after one more event; `done` carries the saved turn, which is authoritative. */
 export function applyEvent(trace: Trace | null, event: MessageEvent): Trace {
  if (event.event === 'start' || event.event === 'done') return event.trace;
  if (!trace) throw new Error('The message stream did not start with its turn.');
  if (event.event === 'search') {
   const searches = [...trace.searches]; searches[event.index] = event.search;
-  return {...trace, searches, selected_evidence: combined(searches)};
+  // The service owns the combined evidence (deduplicated, capped union of the searches so far).
+  return {...trace, searches, selected_evidence: event.selected_evidence};
  }
  if (event.event === 'delta') return {...trace, generation: {...trace.generation, text: (trace.generation.text || '') + event.text}};
  throw new Error('The message stream returned an unknown event.');
