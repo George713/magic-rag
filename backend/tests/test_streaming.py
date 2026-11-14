@@ -29,6 +29,11 @@ def send_message(client, conversation_id, question="Delver", **body):
     return [json.loads(line) for line in response.text.splitlines()]
 
 
+def message_trace(client, *, conversation_id, question, **body):
+    """The trace one streamed message ends with (its `done` event): saved, unless the run was stopped."""
+    return send_message(client, conversation_id, question, **body)[-1]["trace"]
+
+
 def test_one_message_streams_its_search_then_answer_deltas_then_done_and_reopens_after_restart(tmp_path):
     path = tmp_path / "cards.db"
     ingest_sample(path)
@@ -214,6 +219,24 @@ def test_stop_while_the_agent_chooses_its_first_search_removes_the_turn(tmp_path
         assert client.get(f"/api/conversations/{conversation_id}").json()["turns"] == []
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_a_late_or_replayed_cancel_keeps_a_finished_turn(tmp_path, fails):
+    answer = RuntimeError("provider down") if fails else {"text": "It has flying.", "citations": ["sample-delver"], "insufficient_evidence": False}
+    path = tmp_path / "cards.db"
+    ingest_sample(path)
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=[search_call("Delver"), DONE_SEARCHING, answer]))) as client:
+        conversation_id = client.post("/api/conversations").json()["id"]
+        done = send_message(client, conversation_id, "Delver")[-1]
+        turn_id = done["trace"]["turn_id"]
+        for _ in range(2):
+            response = client.post(f"/api/conversations/{conversation_id}/turns/{turn_id}/cancel")
+            assert response.status_code == 204
+        turns = client.get(f"/api/conversations/{conversation_id}").json()["turns"]
+        assert [turn["id"] for turn in turns] == [turn_id]
+        assert turns[0]["state"] == ("failed" if fails else "completed")
+        assert turns[0]["trace"] == done["trace"]
+
+
 def test_follow_up_after_a_stopped_turn_does_not_receive_it_as_context(tmp_path):
     started = Event()
     contexts = []
@@ -247,6 +270,31 @@ def test_follow_up_after_a_stopped_turn_does_not_receive_it_as_context(tmp_path)
         assert "Stopped" not in json.dumps(followup["trace"]["answer_context"])
         turns = client.get(f"/api/conversations/{conversation_id}").json()["turns"]
         assert [turn["question"] for turn in turns] == ["First question", "Any cheaper ones?"]
+
+
+def test_follow_up_receives_only_completed_turns_as_context(tmp_path):
+    contexts = []
+
+    def model(call):
+        if offers_tools(call):
+            contexts.append(call.source["conversation_context"])
+            return search_call("Delver")
+        if call.source["question"] == "Failed question":
+            raise RuntimeError("provider down")
+        return {"text": "It has flying.", "citations": ["sample-delver"], "insufficient_evidence": False}
+
+    path = tmp_path / "cards.db"
+    ingest_sample(path)
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=search_once(model)))) as client:
+        conversation_id = client.post("/api/conversations").json()["id"]
+        assert send_message(client, conversation_id, "First question")[-1]["generation"]["status"] == "completed"
+        assert send_message(client, conversation_id, "Failed question")[-1]["generation"]["status"] == "failed"
+        followup = send_message(client, conversation_id, "Any cheaper ones?")[-1]
+        assert followup["generation"]["status"] == "completed"
+        assert [entry["question"] for entry in contexts[-1]] == ["First question"]
+        assert [entry["question"] for entry in followup["trace"]["answer_context"]["conversation_context"]] == ["First question"]
+        turns = client.get(f"/api/conversations/{conversation_id}").json()["turns"]
+        assert [turn["state"] for turn in turns] == ["completed", "failed", "completed"]
 
 
 def test_streamed_text_holds_split_escapes_and_sends_the_conversation_session(tmp_path):

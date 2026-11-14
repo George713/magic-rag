@@ -121,7 +121,7 @@ def latency_summary(values):
 def run_benchmark(request, search, search_request):
     try:
         prepared = {question.id:{mode:search_request(question=question.question, mode=mode,
-                    filters=question.filters, settings={**PRESET,**request.settings}, generate_answer=False)
+                    filters=question.filters, settings={**PRESET,**request.settings})
                     for mode in MODES} for question in request.suite.questions}
     except ValidationError as exc:
         raise HTTPException(422, "Invalid benchmark question, filters, or retrieval settings. " + "; ".join(error["msg"] for error in exc.errors())) from exc

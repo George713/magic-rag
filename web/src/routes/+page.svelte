@@ -8,7 +8,7 @@
  import type {Conversation} from '$lib/conversations';
  import type {Trace,Generation} from '$lib/types';
  import type {ExactFilters} from '$lib/filters';
- import {cancelPath,removed,streamMessage} from '$lib/message-stream';
+ import {cancelPath,finished,removed,streamMessage} from '$lib/message-stream';
  let question='';let traces:Trace[]=[];let filters:ExactFilters={};let conversationId:string|null=null;
  let history:ConversationHistory;let busy=false;let navigationLoading=false;let generating=false;let ready=false;let error='';
  let providerMessage='Remote generation is not configured.';let mode='keyword';let operation=0;
@@ -33,6 +33,8 @@
     if(operation!==current)return;
     if(!active){active=next;traces=[...traces,next];question='';void history.saved(next);}
     else replace(next);
+    // Once `done` arrives the run is over: Stop is withdrawn so it can never remove a finished answer.
+    if(finished(next)){generating=false;controller=null;active=null;}
    },controller.signal);
    // The stream is authoritative for this in-flight response. Refresh navigation only;
    // production saves terminal output before sending done.
@@ -50,7 +52,7 @@
   if(!turn){abort.abort();return;}
   remove(turn);abort.abort();
   const isCurrent=()=>operation===current&&conversationId===turn.conversation_id;
-  // Closing the stream already stops the run; Stop also deletes the turn if the run finished meanwhile.
+  // Closing the stream already stops the run; cancel deletes the turn by ID if it is still in progress.
   try{const response=await fetch(cancelPath(turn),{method:'POST',signal:AbortSignal.timeout(3000)});if(!response.ok)throw new Error();await history.saved(turn);}
   catch{if(isCurrent())error='Stop could not reach the service within three seconds. The stream connection was closed, which also stops the run.';}
  }

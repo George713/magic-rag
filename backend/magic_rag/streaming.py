@@ -26,7 +26,7 @@ from fastapi.responses import StreamingResponse
 
 from .agent import run_card_search_agent
 from .context import freeze_answer_context
-from .providers import completed_answer, provider_status
+from .providers import completed_answer, provider_ready, provider_status
 from .retrieval import combined_evidence
 
 SEARCHING = {"status": "searching", "message": "Searching cards.", "text": "", "citations": []}
@@ -81,13 +81,13 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
 
     @app.post("/api/conversations/{conversation_id}/turns/{turn_id}/cancel", status_code=204)
     async def cancel(conversation_id: str, turn_id: str):
-        """Stop: delete the message's turn and end its run.
+        """Stop: delete the message's turn while its run is unfinished, and end the run.
 
-        Idempotent: the turn may already be gone because the browser closed the stream first. Stop also
-        removes a turn whose run finished just before Stop arrived, so a stopped message never reappears.
+        Idempotent: the turn may already be gone because the browser closed the stream first. A finished
+        (completed or failed) turn is kept, so a late or replayed Stop never deletes a saved answer.
         """
         store.get(conversation_id)
-        store.delete_turn(conversation_id, turn_id)
+        store.delete_turn(conversation_id, turn_id, expected_states={"in_progress"})
         stopped = active.get((conversation_id, turn_id))
         if stopped is not None:
             stopped.set()
@@ -152,11 +152,11 @@ def register_streaming(app, store, provider, *, request_model, constraints, reme
                         save(lambda saved: trace)
                         yield encode_event("done", generation=generation, trace=trace)
                         return
-                if provider_status(provider)["status"] == "ready":
+                if provider_ready(provider):
                     raise ValueError("The agent ended without an answer")
                 # No ready provider: the typed text was searched as-is and no answer is generated.
                 generation = provider_status(provider)
-                trace = {**trace, "answer_context": freeze_answer_context([search["query"] for search in searches], turns),
+                trace = {**trace, "answer_context": freeze_answer_context(searches, turns),
                          "generation": generation}
                 save(lambda saved: trace)
                 yield encode_event("done", generation=generation, trace=trace)

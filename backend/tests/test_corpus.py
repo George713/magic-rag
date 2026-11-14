@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from magic_rag.app import create_app
+from test_streaming import message_trace
 from test_vectors import ControlledEmbedder
 import sqlite3
 import gzip
@@ -70,7 +71,7 @@ def test_successful_refresh_and_later_failure_preserve_active_search_and_histori
     with TestClient(create_app(path, embedder=ControlledEmbedder(), corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation_id = client.post("/api/conversations").json()["id"]
-        original = client.post("/api/search", json={"question":"Final ability", "conversation_id":conversation_id}).json()
+        original = message_trace(client, **{"question":"Final ability", "conversation_id":conversation_id})
         metadata, records = source.snapshot()
         changed = [{**records[0], "name":"Replacement Source"}]
         source.snapshot = lambda: ({**metadata,"id":"snapshot-two"},changed)
@@ -198,7 +199,7 @@ def test_source_images_survive_retrieval_and_saved_snapshot_refresh(tmp_path):
     with TestClient(create_app(path, embedder=ControlledEmbedder(), corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid", "conversation_id":conversation}).json()
+        trace = message_trace(client, **{"question":"Final ability", "mode":"hybrid", "conversation_id":conversation})
         card = trace["selected_evidence"][0]
         assert card["images"] == [{"name":"Front", "url":"https://cards.example/front.jpg"}, {"name":"Back", "url":"https://cards.example/back.jpg"}]
         assert card["source_url"] == "https://scryfall.com/card/set/1"
@@ -217,7 +218,7 @@ def test_legacy_database_and_saved_turn_without_images_remain_readable(tmp_path)
     ingest_sample(path)
     with TestClient(create_app(path)) as client:
         conversation = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question":"Lightning Bolt", "conversation_id":conversation}).json()
+        trace = message_trace(client, **{"question":"Lightning Bolt", "conversation_id":conversation})
     # Seed the pre-extension storage format at the database boundary.
     for cards in [trace["selected_evidence"], *trace["searches"][0]["stages"].values()]:
         for card in cards:

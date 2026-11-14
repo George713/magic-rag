@@ -13,7 +13,7 @@ A message with N searches makes N + 2 model calls below the limit: N tool calls,
 
 ## Conversation context
 
-The agent receives up to six earlier turns of the current conversation: each turn's original question, its search queries, and its answer if it completed. The names and identities of card assets shown in completed turns are included too, so follow-ups such as "Any cheaper ones?" can refer to cards shown without prose. Failed turns contribute their question and queries but not their partial answer. Stopped turns are deleted, so they contribute nothing. This is conversational context, not verified card evidence: earlier card text never becomes evidence for a new message. Conversations never share history with one another.
+The agent receives up to six earlier completed turns of the current conversation: each turn's original question, its search queries, and its answer. The names and identities of card assets shown in those turns are included too, so follow-ups such as "Any cheaper ones?" can refer to cards shown without prose. Failed and in-progress turns contribute nothing, and stopped turns are deleted. This is conversational context, not verified card evidence: earlier card text never becomes evidence for a new message. Conversations never share history with one another.
 
 The answer request receives this message's search queries and a frozen, bounded copy of the earlier context, separately from the card evidence. See [answer-context limits](providers.md).
 

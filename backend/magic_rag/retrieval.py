@@ -1,4 +1,12 @@
 """Rank fusion combines positions; raw branch scores remain independent signals."""
+import re
+
+
+def query_words(text: str) -> list[str]:
+    """The words a search matches on; text without any cannot be searched."""
+    return re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+
+
 def exact_name_match(name: str, query: str) -> bool:
     return name.strip().casefold() == query.strip().casefold()
 

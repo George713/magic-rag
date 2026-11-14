@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from magic_rag.app import create_app
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
+from scripted_chat_model import DONE_SEARCHING, ScriptedChatModel, offers_tools, search_call
 from test_streaming import send_message
 
 BOLT, DELVER, SOL_RING = "sample-lightning-bolt", "sample-delver", "sample-sol-ring"
@@ -215,3 +215,30 @@ def test_explicit_filters_and_the_search_mode_apply_to_every_search(tmp_path):
         assert [card["card_id"] for card in done["trace"]["selected_evidence"]] == [DELVER]
         tool_results = " ".join(m.content for m in model.calls[1].messages if m.type == "tool")
         assert BOLT not in tool_results
+
+
+def test_each_search_in_reranking_mode_keeps_its_own_reranking_changes_in_the_retrieval_details(tmp_path):
+    from artifact_cards import ATOG, ENGINEER, TopicEmbedder, TopicReranker, seed_artifact_cards
+
+    path = tmp_path / "cards.db"
+    seed_artifact_cards(path)
+    model = ScriptedChatModel(script=[search_call("creature gets +2/+2 until end of turn"), search_call("Atog"), DONE_SEARCHING,
+                                      {"text": "Both sacrifice artifacts.", "citations": [ATOG, ENGINEER], "insufficient_evidence": False}])
+    with TestClient(create_app(path, embedder=TopicEmbedder(), reranker=TopicReranker(), chat_model=model)) as client:
+        conversation_id = client.post("/api/conversations").json()["id"]
+        events = send_message(client, conversation_id, "artifact sacrifice creatures", mode="hybrid_rerank")
+        done = events[-1]
+        assert done["generation"]["status"] == "completed"
+        saved = client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]["trace"]["searches"]
+    first, second = (event["search"] for event in searches_of(events))
+    assert saved == [first, second]
+    # The first search's wording favors Atog by keyword, but the reranker promotes Goblin Engineer.
+    assert [card["card_id"] for card in first["stages"]["fused"]] == [ATOG, ENGINEER]
+    assert [(card["card_id"], card["fused_rank"], card["rank_change"]) for card in first["stages"]["reranked"]] == [(ENGINEER, 2, 1), (ATOG, 1, -1)]
+    assert [card["card_id"] for card in first["selected_evidence"]] == [ENGINEER, ATOG]
+    # The second search ranks Atog first before and after reranking.
+    assert [(card["card_id"], card["fused_rank"], card["rank_change"]) for card in second["stages"]["reranked"]] == [(ATOG, 1, 0), (ENGINEER, 2, 0)]
+    for search in (first, second):
+        assert search["mode"] == "hybrid_rerank"
+        assert search["models"]["reranker"] == TopicReranker.config
+        assert search["timings_ms"]["reranking"] >= 0

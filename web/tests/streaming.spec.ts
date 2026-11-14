@@ -121,3 +121,25 @@ test('Stop removes the turn even when cancel HTTP stalls, and cannot touch a lat
   await expect(latest.getByTestId('actual-query')).toHaveText('Lightning Bolt');
  } finally {release();}
 });
+
+test('once the answer is done Stop is withdrawn, even while the chat list is still refreshing', async ({page}) => {
+ await ask(page,'Delver');
+ const turn = page.locator('.turn').last();
+ await expect(turn.getByTestId('answer-text')).toHaveText('The transformed ');
+ // Hold the chat-list refresh that follows `done`, keeping the request open after the answer finished.
+ const held: (() => Promise<void>)[] = [];
+ const list = (url: URL) => url.pathname === '/api/conversations';
+ await page.route(list, route => {
+  if (route.request().method() !== 'GET') return route.continue();
+  held.push(() => route.continue());
+ });
+ await expect(turn.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
+ await expect.poll(() => held.length).toBeGreaterThan(0);
+ await expect(page.getByRole('button',{name:'Stop answer'})).not.toBeVisible();
+ await expect(page.locator('.turn')).toHaveCount(1);
+ for (const release of held) await release();
+ await page.unroute(list);
+ await page.reload();
+ await page.getByRole('button',{name:'Open conversation: Delver',exact:true}).click();
+ await expect(page.getByTestId('answer-text')).toHaveText('The transformed face has flying.');
+});

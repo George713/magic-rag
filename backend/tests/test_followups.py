@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from magic_rag.app import create_app
-from artifact_cards import ATOG, FOLLOWUP, INITIAL, STANDALONE, TopicEmbedder, TopicReranker, seed_artifact_cards
+from artifact_cards import ATOG, FOLLOWUP, INITIAL, FOLLOWUP_SEARCH, TopicEmbedder, TopicReranker, seed_artifact_cards
 from scripted_chat_model import DONE_SEARCHING, search_once, ScriptedChatModel, offers_tools, search_call
 from test_streaming import send_message
 
@@ -16,7 +16,7 @@ def topic_model(call):
         if question == FOLLOWUP:
             assert call.source["conversation_context"] == [{"question": INITIAL, "query": INITIAL,
                                                            "answer": "Atog sacrifices artifacts."}]
-        return search_call(STANDALONE if question == FOLLOWUP else question)
+        return search_call(FOLLOWUP_SEARCH if question == FOLLOWUP else question)
     return {"text": "Atog sacrifices artifacts.", "citations": [ATOG], "insufficient_evidence": False}
 
 
@@ -33,7 +33,7 @@ def test_followup_search_uses_the_model_written_topic_in_every_stage_and_keeps_f
         events = send_message(client, conversation_id, FOLLOWUP)
         trace = events[-1]["trace"]
         assert trace["question"] == FOLLOWUP
-        assert [search["query"] for search in trace["searches"]] == [STANDALONE]
+        assert [search["query"] for search in trace["searches"]] == [FOLLOWUP_SEARCH]
         assert trace["searches"][0]["mode"] == mode and trace["searches"][0]["filters"] == filters
         assert trace["selected_evidence"][0]["card_id"] == ATOG
         assert trace["generation"]["status"] == "completed"
@@ -68,13 +68,12 @@ def test_absent_provider_retains_filters_and_explicit_empty_object_clears_them(t
     seed_artifact_cards(path)
     with TestClient(create_app(path)) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
-        initial = client.post("/api/search", json={"question": INITIAL, "conversation_id": conversation_id,
-                                                  "filters": {"mana_value_max": 0}}).json()
-        inherited = client.post("/api/search", json={"question": "Atog", "conversation_id": conversation_id}).json()
+        initial = send_message(client, conversation_id, INITIAL, filters={"mana_value_max": 0})[-1]["trace"]
+        inherited = send_message(client, conversation_id, "Atog")[-1]["trace"]
         assert inherited["searches"][0]["query"] == "Atog"
         assert inherited["searches"][0]["filters"] == {"mana_value_max": 0}
         assert inherited["selected_evidence"] == []
-        cleared = client.post("/api/search", json={"question": "Atog", "conversation_id": conversation_id, "filters": {}}).json()
+        cleared = send_message(client, conversation_id, "Atog", filters={})[-1]["trace"]
         assert cleared["searches"][0]["filters"] == {}
         assert cleared["selected_evidence"][0]["card_id"] == ATOG
         assert client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]["trace"] == initial

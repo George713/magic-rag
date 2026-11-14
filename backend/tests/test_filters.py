@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from magic_rag.app import create_app
+from test_streaming import message_trace
 from magic_rag.ingest import ingest_sample
 from test_vectors import ControlledEmbedder
 
@@ -79,8 +80,8 @@ def test_clearing_filters_returns_candidates_and_keeps_saved_trace_constraints(t
     ingest_sample(path, embedder=ControlledEmbedder())
     with TestClient(create_app(path, embedder=ControlledEmbedder())) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question": "Sol Ring", "mode": "hybrid", "conversation_id": conversation_id,
-                            "filters": {"colors": ["G"]}}).json()
+        trace = message_trace(client, **{"question": "Sol Ring", "mode": "hybrid", "conversation_id": conversation_id,
+                            "filters": {"colors": ["G"]}})
         assert all(not candidates for candidates in trace["searches"][0]["stages"].values())
         cleared = client.post("/api/search", json={"question": "Sol Ring", "mode": "hybrid", "filters": {}}).json()
         assert cleared["selected_evidence"][0]["card_id"] == "sample-sol-ring"
@@ -123,9 +124,7 @@ def test_legendary_eligibility_precedes_limits_and_exact_names_and_can_be_cleare
     with TestClient(create_app(path, embedder=model, reranker=FilterReranker())) as client:
         conversation = client.post('/api/conversations').json()['id']
         filters = {"legendary": True, "card_types": ["Artifact", "Creature"], "colors": ["U", "R"], "mana_value_min": 2, "mana_value_max": 2}
-        response = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": filters, "conversation_id": conversation, "settings": {"keyword_candidates": 1, "vector_candidates": 1}})
-        assert response.status_code == 200
-        trace = response.json()
+        trace = message_trace(client, question="fixture", mode=mode, filters=filters, conversation_id=conversation, settings={"keyword_candidates": 1, "vector_candidates": 1})
         for candidates in [*trace['searches'][0]['stages'].values(), trace['selected_evidence']]:
             assert [card['card_id'] for card in candidates] == ['legend']
         saved = client.get(f'/api/conversations/{conversation}').json()

@@ -6,14 +6,32 @@ import pytest
 def test_empty_corpus_still_explains_search_and_provider_state(tmp_path):
     with TestClient(create_app(tmp_path / "cards.db")) as client:
         response = client.post("/api/search", json={"question": "Lightning Bolt"})
+        assert client.get("/api/provider").json()["status"] == "unconfigured"
     assert response.status_code == 200
     trace = response.json()
     assert trace["searches"][0]["query"] == "Lightning Bolt"
     assert trace["searches"][0]["mode"] == "keyword"
     assert trace["corpus"] is None
     assert trace["selected_evidence"] == []
-    assert trace["generation"]["status"] == "unconfigured"
     assert "rewrite" not in trace
+
+
+@pytest.mark.parametrize("extra", [{"generate_answer": True}, {"conversation_id": "chat"}])
+def test_search_is_plain_retrieval_that_never_answers_or_saves_a_turn(tmp_path, extra):
+    from magic_rag.ingest import ingest_sample
+    from scripted_chat_model import ScriptedChatModel
+    path = tmp_path / "cards.db"
+    ingest_sample(path)
+    model = ScriptedChatModel(script=[])
+    with TestClient(create_app(path, chat_model=model)) as client:
+        conversation_id = client.post("/api/conversations").json()["id"]
+        extra = {key: conversation_id if key == "conversation_id" else value for key, value in extra.items()}
+        assert client.post("/api/search", json={"question": "Delver", **extra}).status_code == 422
+        trace = client.post("/api/search", json={"question": "Delver"}).json()
+        assert trace["selected_evidence"][0]["card_id"] == "sample-delver"
+        assert not {"generation", "answer_context", "conversation_id", "turn_id"} & trace.keys()
+        assert client.get(f"/api/conversations/{conversation_id}").json()["turns"] == []
+    assert model.calls == []
 
 
 def test_sample_search_retains_all_faces_and_collapses_printings(tmp_path):

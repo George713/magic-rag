@@ -106,7 +106,7 @@ def test_without_a_provider_the_typed_text_is_searched_as_is_and_no_answer_is_ge
         assert turn["trace"]["selected_evidence"][0]["card_id"] == "sample-lightning-bolt"
 
 
-def test_followups_receive_bounded_context_from_earlier_turns_and_the_model_resolves_the_reference(tmp_path):
+def test_followups_receive_bounded_context_from_earlier_completed_turns_and_the_model_resolves_the_reference(tmp_path):
     path = tmp_path / "cards.db"
     ingest_sample(path)
     contexts = []
@@ -136,9 +136,10 @@ def test_followups_receive_bounded_context_from_earlier_turns_and_the_model_reso
         events = send_message(client, conversation_id, "what did that one cost?")
         history = contexts[-1]
         assert len(history) == 6
-        assert [item["question"] for item in history] == ["Delver 1", "Delver 2", "Delver 3", "Delver 4", "Sol Ring fails", "Lightning Bolt"]
+        # Only completed turns are context: the failed turn and its partial text are left out.
+        assert [item["question"] for item in history] == ["Delver 0", "Delver 1", "Delver 2", "Delver 3", "Delver 4", "Lightning Bolt"]
         assert history[-1] == {"question": "Lightning Bolt", "query": "Lightning Bolt", "answer": "About Lightning Bolt."}
-        assert "answer" not in history[-2] and "Unverified partial" not in json.dumps(history)
+        assert "Sol Ring fails" not in json.dumps(history) and "Unverified partial" not in json.dumps(history)
         assert all("selected_evidence" not in item for item in history)
         assert events[1]["query"] == "Lightning Bolt"
         done = events[-1]
