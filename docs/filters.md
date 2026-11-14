@@ -1,6 +1,6 @@
 # Exact card filters
 
-Filters are explicit controls; search text and query rewriting never change them. The same constraints apply to keyword and vector candidate eligibility before ranking limits, so fusion and reranking only see eligible cards. Changing or clearing controls affects subsequent searches; each saved trace retains its own filter snapshot.
+Filters are explicit controls: search text never changes them, and the card-search agent can neither see nor change them. They apply to every search the agent makes. The same constraints apply to keyword and vector candidate eligibility before ranking limits, so fusion and reranking only see eligible cards. Changing or clearing controls affects subsequent searches; each saved trace retains its own filter snapshot.
 
 ## Matching semantics
 
