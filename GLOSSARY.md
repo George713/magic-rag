@@ -31,3 +31,11 @@ _Avoid_: Legendary creature (when referring to legendary cards of any card type)
 **Card asset**:
 A visual representation of a retrieved card selected for a response, using imagery of a representative printing and its faces where applicable.
 _Avoid_: Card text, printing (when referring to the visual representation itself)
+
+**Search**:
+One query run against the cards under the player's filters and search mode, returning ranked cards. A single message may involve several searches.
+_Avoid_: Rewrite, standalone query
+
+**Evidence**:
+The cards an answer may draw on and cite: the combined, deduplicated cards found by a message's searches.
+_Avoid_: Sources, conversation context
