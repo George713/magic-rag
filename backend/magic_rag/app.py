@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import sqlite3
 from pathlib import Path
 from time import perf_counter
@@ -8,16 +7,15 @@ from uuid import uuid4
 from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from magic_rag.providers import ChatModelProvider, generate_answer, provider_status, provider_from_env
+from pydantic import BaseModel, ConfigDict, Field
+from magic_rag.providers import ChatModelProvider, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
-from .retrieval import combined_evidence, exact_name_match, fuse
+from .retrieval import combined_evidence, exact_name_match, fuse, query_words
 from .conversations import register_conversations
 from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 from .evaluation import register_evaluation
-from .context import freeze_answer_context
 
 
 def default_db_path() -> Path:
@@ -70,8 +68,8 @@ class MessageRequest(BaseModel):
 
 
 class SearchRequest(MessageRequest):
-    generate_answer: bool = False
-    conversation_id: str | None = None
+    """Plain synchronous retrieval of the typed text, for scripts and evaluation: no conversation turn, no answer."""
+    model_config = ConfigDict(extra="forbid")
 
 
 def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, chat_model=None, corpus_source=None) -> FastAPI:
@@ -102,7 +100,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
     def run_search(db, query, mode, filters, settings):
         """One search: its query, the snapshot of mode/filters it ran under, stage rankings, timings, and selected cards."""
         start = perf_counter()
-        tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
+        tokens = query_words(query)
         expression = " OR ".join('"' + token + '"' for token in tokens)
         eligibility, filter_parameters = filters.sql()
         stages = {}
@@ -155,7 +153,7 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         mode = conversation['current_mode'] if conversation is not None and 'mode' not in request.model_fields_set else request.mode
         if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
             raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
-        if not re.findall(r"[^\W_]+", request.question, flags=re.UNICODE):
+        if not query_words(request.question):
             raise HTTPException(422, "Enter at least one word to search.")
         return filters, mode
 
@@ -165,38 +163,22 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                 filters=filters if "filters" in request.model_fields_set else None,
                 mode=mode if "mode" in request.model_fields_set else None)
 
-    def retrieve(queries, mode, filters, settings):
-        """Run each query in one read transaction, so every search of a turn sees one corpus snapshot."""
+    def retrieve(query, mode, filters, settings):
+        """One search in one read transaction, so its corpus record matches the cards it found."""
         with connect(path) as db:
             db.execute("BEGIN")
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            searches = [run_search(db, query, mode, filters, settings) for query in queries]
-        return (dict(corpus) if corpus else None), searches
+            search = run_search(db, query, mode, filters, settings)
+        return (dict(corpus) if corpus else None), search
 
     @app.post("/api/search")
     def search(request: SearchRequest):
-        turns = []
-        conversation = None
-        if request.conversation_id is not None:
-            conversation = conversations.get(request.conversation_id)
-            turns = conversation["turns"]
-        filters, mode = search_constraints(request, conversation)
-        start = perf_counter()
-        trace_id = str(uuid4())
-        # The typed text is searched as-is; the agent's model-written searches run only for streamed messages.
-        answer_context = freeze_answer_context([request.question], turns)
-        corpus, searches = retrieve([request.question], mode, filters, request.settings)
-        evidence = combined_evidence(searches)
-        trace = {"trace_id": trace_id, "question": request.question,
-                "corpus": corpus,
-                "searches": searches, "selected_evidence": evidence,
-                "timings_ms": {"retrieval": (perf_counter() - start) * 1000},
-                "answer_context":answer_context,
-                "generation": generate_answer(provider, request.question, evidence, request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
-        if request.conversation_id is not None:
-            remember_constraints(request.conversation_id, request, filters, mode)
-            conversations.append_trace(request.conversation_id, trace)
-        return trace
+        """Search the typed text as-is under the request's filters and mode; nothing is saved or generated."""
+        filters, mode = search_constraints(request, None)
+        corpus, search = retrieve(request.question, mode, filters, request.settings)
+        return {"trace_id": str(uuid4()), "question": request.question, "corpus": corpus,
+                "searches": [search], "selected_evidence": combined_evidence([search]),
+                "timings_ms": {"retrieval": search["timings_ms"]["retrieval"]}}
 
     register_streaming(app, conversations, provider, request_model=MessageRequest, constraints=search_constraints,
                        remember=remember_constraints, retrieve=retrieve)

@@ -27,7 +27,6 @@ to answer from.
 from contextlib import aclosing
 import json
 import operator
-import re
 from typing import Annotated, TypedDict
 
 import anyio
@@ -38,8 +37,8 @@ from langgraph.graph.message import add_messages
 from langgraph.types import StreamWriter
 
 from .context import conversation_context, freeze_answer_context
-from .providers import provider_status
-from .retrieval import combined_evidence
+from .providers import provider_ready
+from .retrieval import combined_evidence, query_words
 
 SEARCH_LIMIT = 3
 
@@ -81,22 +80,22 @@ def tool_result(search):
                        for card in search["selected_evidence"]])
 
 
-def card_search_agent(provider, retrieve, *, question, turns, session_id, mode, filters, settings, search_limit=SEARCH_LIMIT):
-    """Build the graph for one message; returns `(graph, initial_state)`.
+def run_card_search_agent(provider, retrieve, *, question, turns, session_id, mode, filters, settings):
+    """Build and run the graph for one message, yielding its custom stream events.
 
-    `retrieve(queries, mode, filters, settings) -> (corpus, searches)` is the application's retrieval.
+    `retrieve(query, mode, filters, settings) -> (corpus, search)` is the application's retrieval.
     """
-    ready = provider_status(provider)["status"] == "ready"
+    ready = provider_ready(provider)
     headers = {"x-opencode-session": session_id}
 
     async def agent(state: AgentState, writer: StreamWriter):
-        if state["search_count"] < search_limit:
+        if state["search_count"] < SEARCH_LIMIT:
             model = provider.chat_model.bind_tools([search_cards], tool_choice="auto" if state["search_count"] else "required")
             message = await model.ainvoke(state["messages"], extra_headers=headers)
             if message.tool_calls:
                 return {"messages": [message]}
         evidence = combined_evidence(state["searches"])
-        context = freeze_answer_context([search["query"] for search in state["searches"]], turns)
+        context = freeze_answer_context(state["searches"], turns)
         writer({"answering": context})
         if not evidence:
             writer({"generation": NO_EVIDENCE})
@@ -114,14 +113,14 @@ def card_search_agent(provider, retrieve, *, question, turns, session_id, mode, 
             query = call["args"].get("query")
             if ready and isinstance(query, str):
                 query = query.strip()  # Model-written; the typed text (no provider) is searched exactly as-is.
-            if count >= search_limit:
+            if count >= SEARCH_LIMIT:
                 content = LIMIT_REACHED
-            elif not isinstance(query, str) or not re.search(r"[^\W_]+", query, flags=re.UNICODE):
+            elif not isinstance(query, str) or not query_words(query):
                 count += 1
                 content = NO_WORDS
             else:
                 count += 1
-                corpus, [record] = await anyio.to_thread.run_sync(retrieve, [query], mode, filters, settings, abandon_on_cancel=True)
+                corpus, record = await anyio.to_thread.run_sync(retrieve, query, mode, filters, settings, abandon_on_cancel=True)
                 writer({"search": record, "corpus": corpus})
                 searches.append(record)
                 content = tool_result(record)
@@ -138,10 +137,4 @@ def card_search_agent(provider, retrieve, *, question, turns, session_id, mode, 
     initial = {"messages": [SystemMessage(AGENT_PROMPT),
                             HumanMessage(json.dumps({"question": question, "conversation_context": conversation_context(turns)}))],
                "searches": [], "search_count": 0, "answered": False}
-    return graph.compile(), initial
-
-
-def run_card_search_agent(*args, **kwargs):
-    """Run the agent for one message, yielding its custom stream events."""
-    graph, initial = card_search_agent(*args, **kwargs)
-    return graph.astream(initial, stream_mode="custom")
+    return graph.compile().astream(initial, stream_mode="custom")

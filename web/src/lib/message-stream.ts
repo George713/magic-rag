@@ -18,6 +18,11 @@ export function removed(trace: Trace) {
  return trace.generation.status === 'cancelled';
 }
 
+/** Whether the run has ended (`done` arrived): Stop no longer applies, and the turn is kept unless it was removed. */
+export function finished(trace: Trace) {
+ return trace.generation.status !== 'searching' && trace.generation.status !== 'generating';
+}
+
 /** The turn as known after one more event; `done` carries the saved turn, which is authoritative. */
 export function applyEvent(trace: Trace | null, event: MessageEvent): Trace {
  if (event.event === 'start') return event.trace;

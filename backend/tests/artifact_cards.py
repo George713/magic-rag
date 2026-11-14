@@ -5,7 +5,7 @@ from magic_rag.vectors import store_vectors
 
 INITIAL = "Find artifact-sacrifice creatures"
 FOLLOWUP = "Any cheaper ones?"
-STANDALONE = "Atog artifact sacrifice cheaper creatures"
+FOLLOWUP_SEARCH = "Atog artifact sacrifice cheaper creatures"  # The model-written search for FOLLOWUP.
 ATOG = "3095f2cf-05c3-4381-929f-c526b6fc30a7"
 ENGINEER = "c1d6cce8-085f-42cb-8b0c-b6fbbf88b16a"
 

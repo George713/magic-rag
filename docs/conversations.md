@@ -18,7 +18,7 @@ Retrieval works without a remote provider. A turn is `in_progress` while its mes
 - `PATCH /api/conversations/{id}` accepts `{ "filters": { ... } }`, `{ "mode": "hybrid" }`, or both, saving validated current preferences independently of turns. Modes are `keyword`, `vector`, `hybrid`, and `hybrid_rerank`. Empty updates, null preferences, and unknown fields/modes are rejected. Conversation details expose `current_filters` and `current_mode`.
 - `DELETE /api/conversations/{id}` deletes its history and returns status 204.
 - `POST /api/conversations/{id}/messages` sends one message as one streamed request; see [streaming](streaming.md).
-- `POST /api/search` accepts optional `conversation_id`. Omitted filters/mode inherit that conversation's current preferences; explicit filters/mode are saved on successful retrieval. The response adds `conversation_id` and `turn_id` and saves that exact trace. Omitting the ID leaves standalone retrieval available without saving a turn. Unknown/deleted IDs return 404, and invalid searches do not create turns.
+- `POST /api/conversations/{id}/messages` is the only way to add a turn (see [streaming](streaming.md)). Omitted filters/mode inherit that conversation's current preferences; explicit filters/mode are saved on successful validation. Unknown/deleted IDs return 404, and invalid questions do not create turns. `POST /api/search` is plain retrieval and never saves a turn.
 
 Conversation titles initially read “New conversation” and use the first submitted question (up to 80 characters) after a successful retrieval. No title or trace contains provider credentials.
 

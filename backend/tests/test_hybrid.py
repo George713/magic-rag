@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from magic_rag.app import create_app
+from test_streaming import message_trace
 from magic_rag.ingest import ingest_sample
 from test_vectors import ControlledEmbedder
 
@@ -58,16 +59,16 @@ def test_saved_hybrid_turn_and_provider_share_the_same_limited_evidence(tmp_path
     path = tmp_path / "cards.db"
     model = ControlledEmbedder()
     ingest_sample(path, embedder=model)
-    from scripted_chat_model import ScriptedChatModel
+    from scripted_chat_model import ScriptedChatModel, searching
     def answer(call):
         evidence = call.source["selected_evidence"]
         assert len(evidence) == 1
         assert evidence[0]["card_id"] == "sample-sol-ring"
         return {"text":"This card produces mana.", "citations":["sample-sol-ring"], "insufficient_evidence":False}
-    with TestClient(create_app(path, embedder=model, chat_model=ScriptedChatModel(script=[answer]))) as client:
+    with TestClient(create_app(path, embedder=model, chat_model=ScriptedChatModel(script=searching(answer)))) as client:
         conversation = client.post("/api/conversations").json()
-        trace = client.post("/api/search", json={"question":"Sol Ring", "mode":"hybrid", "generate_answer":True,
-            "conversation_id":conversation["id"], "settings":{"evidence_limit":1}}).json()
+        trace = message_trace(client, **{"question":"Sol Ring", "mode":"hybrid",
+            "conversation_id":conversation["id"], "settings":{"evidence_limit":1}})
         assert trace["generation"]["status"] == "completed"
         saved = client.get(f'/api/conversations/{conversation["id"]}').json()["turns"][0]["trace"]
         assert saved == trace

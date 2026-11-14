@@ -57,7 +57,7 @@ class ChatModelProvider:
 
     @staticmethod
     def answer_source(question, evidence, context):
-        context = context or {"search_queries":[question], "conversation_context":[]}
+        """`context`: the frozen answer context (`context.freeze_answer_context`)."""
         return {"question":question, **context,
                 "selected_evidence":[{"card_id":card["card_id"],"name":card["name"],"text":card["text"]} for card in evidence]}
 
@@ -70,12 +70,7 @@ class ChatModelProvider:
             raise ValueError("Provider returned non-text content")
         return json.loads(message.content)
 
-    def answer(self, question, evidence, session_id, *, context=None):
-        message = self.chat_model.invoke(self.messages(SYSTEM_PROMPT, self.answer_source(question, evidence, context)),
-                                         **self.request_options(session_id))
-        return self.completed_content(message)
-
-    async def stream_answer(self, question, evidence, session_id, *, context=None):
+    async def stream_answer(self, question, evidence, session_id, *, context):
         messages = self.messages(SYSTEM_PROMPT + " Put the text property first.", self.answer_source(question, evidence, context))
         message = None
         displayed = ""
@@ -171,6 +166,10 @@ def provider_status(provider):
     return {"status": "ready", "message": "Remote generation is configured."}
 
 
+def provider_ready(provider):
+    return provider_status(provider)["status"] == "ready"
+
+
 def completed_answer(payload, evidence, *, streamed_text=None):
     result = AnswerPayload.model_validate(payload)
     cards = {card["card_id"]:card for card in evidence}
@@ -188,14 +187,3 @@ def completed_answer(payload, evidence, *, streamed_text=None):
             "text":result.text, "insufficient_evidence":result.insufficient_evidence,
             "citations":[{"card_id":card_id,"name":cards[card_id]["name"]} for card_id in dict.fromkeys(result.citations)],
             "assets":[cards[card_id] for card_id in dict.fromkeys(result.assets)]}
-
-
-def generate_answer(provider, question, evidence, session_id, *, context=None):
-    if provider_status(provider)["status"] != "ready":
-        return provider_status(provider)
-    if not evidence:
-        return {"status": "completed", "message": "No retrieved evidence.", "text": "There is insufficient retrieved card evidence to answer this question. This is not an authoritative rules ruling.", "citations": [], "insufficient_evidence": True}
-    try:
-        return completed_answer(provider.answer(question,evidence,session_id,context=context),evidence)
-    except Exception:
-        return {"status": "failed", "message": "Answer generation failed or returned invalid citations. Check provider configuration and try again; retrieved evidence is preserved."}

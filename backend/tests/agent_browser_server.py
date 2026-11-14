@@ -6,12 +6,15 @@ from pathlib import Path
 import uvicorn
 
 from magic_rag.app import create_app, connect
-from artifact_cards import ATOG, ENGINEER, FOLLOWUP, STANDALONE, TopicEmbedder, TopicReranker, seed_artifact_cards
+from artifact_cards import ATOG, ENGINEER, FOLLOWUP, FOLLOWUP_SEARCH, TopicEmbedder, TopicReranker, seed_artifact_cards
 from scripted_chat_model import DONE_SEARCHING, ScriptedChatModel, offers_tools, search_call
 
 LOOSE = "something red that eats artifacts"
 WRITTEN = "Atog sacrifice an artifact creature"
 COMPARE = "compare Atog and Goblin Engineer"
+RERANKED = "rerank artifact sacrifice creatures"
+# The first query favors Atog by keyword; the topic reranker promotes Goblin Engineer. The second keeps Atog first.
+RERANKED_SEARCHES = ["creature gets +2/+2 until end of turn", "Atog"]
 
 
 def agent(call):
@@ -20,10 +23,11 @@ def agent(call):
     if offers_tools(call):
         if question == "simulate provider failure":
             raise RuntimeError("Controlled provider outage")
-        if question == COMPARE:
-            # One search per compared card, as separate model turns.
-            return search_call(["Atog", "Goblin Engineer"][len(searched)]) if len(searched) < 2 else DONE_SEARCHING
-        return DONE_SEARCHING if searched else search_call({LOOSE: WRITTEN, FOLLOWUP: STANDALONE}.get(question, question))
+        if question in (COMPARE, RERANKED):
+            # One search per model turn: one per compared card, or two differently reranked searches.
+            queries = ["Atog", "Goblin Engineer"] if question == COMPARE else RERANKED_SEARCHES
+            return search_call(queries[len(searched)]) if len(searched) < 2 else DONE_SEARCHING
+        return DONE_SEARCHING if searched else search_call({LOOSE: WRITTEN, FOLLOWUP: FOLLOWUP_SEARCH}.get(question, question))
     if question == COMPARE:
         async def comparison():
             await asyncio.sleep(3)  # Long enough to see both live search lines.

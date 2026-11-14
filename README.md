@@ -28,7 +28,7 @@ Each message runs one hand-built [LangGraph](https://langchain-ai.github.io/lang
 
 ```mermaid
 flowchart TD
-    Q["Question + last six turns"] --> R{"Provider ready?"}
+    Q["Question + last six completed turns"] --> R{"Provider ready?"}
     R -- yes --> A["agent node<br/>chat model with search_cards(query)"]
     A -- "search_cards call<br/>(fewer than 3 searches so far)" --> S["search node"]
     S -- "cards with complete text" --> A

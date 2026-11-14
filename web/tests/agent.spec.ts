@@ -83,3 +83,23 @@ test('a comparison shows one live line per search, collapses into "2 searches", 
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
  await page.screenshot({path:'test-results/agent-multisearch-mobile.png',fullPage:true});
 });
+
+test('in reranking mode each search of a message shows its own reranking changes',async ({page}) => {
+ await page.goto('/');
+ await page.getByLabel('Search mode').selectOption('hybrid_rerank');
+ await page.getByLabel('Your question').fill('rerank artifact sacrifice creatures');
+ await page.getByRole('button',{name:'Send',exact:true}).click();
+ const turn=page.locator('section.turn').last();
+ await expect(turn.getByTestId('answer-text')).toHaveText('Atog sacrifices artifacts to grow.');
+ await turn.locator('.search-summary > summary').click();
+ const first=turn.getByRole('region',{name:'Search 1',exact:true});
+ const second=turn.getByRole('region',{name:'Search 2',exact:true});
+ await expect(first.getByTestId('actual-query')).toHaveText('creature gets +2/+2 until end of turn');
+ await expect(first.getByRole('heading',{name:'Reranked candidates 2'})).toBeVisible();
+ await expect(first.getByText('Fused #2 → #1 · promoted 1',{exact:true})).toBeVisible();
+ await expect(first.getByText('Fused #1 → #2 · demoted 1',{exact:true})).toBeVisible();
+ await expect(first.getByTestId('search-timings')).toContainText('reranking:');
+ await expect(second.getByTestId('actual-query')).toHaveText('Atog');
+ await expect(second.getByText('Fused #1 → #1 · unchanged',{exact:true})).toBeVisible();
+ await expect(second.getByText(/promoted|demoted/)).toHaveCount(0);
+});
