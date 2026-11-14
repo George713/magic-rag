@@ -4,6 +4,7 @@ import sqlite3
 from fastapi.testclient import TestClient
 
 from magic_rag.app import create_app
+from test_streaming import message_trace
 from magic_rag.ingest import ingest_sample
 
 
@@ -19,17 +20,17 @@ class ImageSource:
         }]
 
 
-class AssetProvider:
-    def answer(self, question, evidence, session_id, **kwargs):
-        return {'text': 'Recommended.', 'assets': ['sample-delver'], 'citations': ['sample-delver']}
+def asset_model():
+    from scripted_chat_model import ScriptedChatModel, searching
+    return ScriptedChatModel(script=searching({'text': 'Recommended.', 'assets': ['sample-delver'], 'citations': ['sample-delver']}))
 
 
 def test_repair_fills_legacy_evidence_and_selected_assets_without_reindexing(tmp_path):
     path = tmp_path / 'cards.db'
     ingest_sample(path)
-    with TestClient(create_app(path, provider=AssetProvider(), corpus_source=ImageSource())) as client:
+    with TestClient(create_app(path, chat_model=asset_model(), corpus_source=ImageSource())) as client:
         chat = client.post('/api/conversations').json()['id']
-        original = client.post('/api/search', json={'question': 'Delver', 'conversation_id': chat, 'generate_answer': True}).json()
+        original = message_trace(client, **{'question': 'Delver', 'conversation_id': chat})
         assert original['generation']['assets'][0]['images'] == []
         corpus = client.get('/api/corpus').json()
         # A legacy snapshot may refer to a card no longer in the active corpus.
@@ -43,10 +44,10 @@ def test_repair_fills_legacy_evidence_and_selected_assets_without_reindexing(tmp
         assert len(images) == 2
         assert images[1]['url'] == 'https://cards.example/back.jpg'
         assert saved['selected_evidence'][0]['images'] == images
-        assert saved['stages']['keyword'][0]['images'] == images
+        assert saved['searches'][0]['stages']['keyword'][0]['images'] == images
         assert saved['generation']['text'] == original['generation']['text']
         assert saved['generation']['citations'] == original['generation']['citations']
-        assert saved['mode'] == original['mode']
+        assert saved['searches'][0]['mode'] == original['searches'][0]['mode']
         assert saved['selected_evidence'][0]['text'] == original['selected_evidence'][0]['text']
         assert client.get('/api/corpus').json() == corpus
         # Repeat repairs preserve historical image snapshots and selections.
@@ -79,9 +80,9 @@ def test_repair_rejects_unusable_source_and_database_failure_is_atomic(tmp_path)
     path = tmp_path / 'cards.db'
     ingest_sample(path)
     source = ImageSource()
-    with TestClient(create_app(path, provider=AssetProvider(), corpus_source=source)) as client:
+    with TestClient(create_app(path, chat_model=asset_model(), corpus_source=source)) as client:
         chat = client.post('/api/conversations').json()['id']
-        original = client.post('/api/search', json={'question': 'Delver', 'conversation_id': chat, 'generate_answer': True}).json()
+        original = message_trace(client, **{'question': 'Delver', 'conversation_id': chat})
         with sqlite3.connect(path) as db:
             db.execute("CREATE TRIGGER reject_repair BEFORE UPDATE ON conversation_turns BEGIN SELECT RAISE(ABORT, 'repair failed'); END")
         assert client.post('/api/corpus/repair-images').status_code == 422

@@ -6,14 +6,32 @@ import pytest
 def test_empty_corpus_still_explains_search_and_provider_state(tmp_path):
     with TestClient(create_app(tmp_path / "cards.db")) as client:
         response = client.post("/api/search", json={"question": "Lightning Bolt"})
+        assert client.get("/api/provider").json()["status"] == "unconfigured"
     assert response.status_code == 200
     trace = response.json()
-    assert trace["query"] == "Lightning Bolt"
-    assert trace["mode"] == "keyword"
+    assert trace["searches"][0]["query"] == "Lightning Bolt"
+    assert trace["searches"][0]["mode"] == "keyword"
     assert trace["corpus"] is None
     assert trace["selected_evidence"] == []
-    assert trace["generation"]["status"] == "unconfigured"
-    assert trace["rewrite"]["status"] == "unavailable"
+    assert "rewrite" not in trace
+
+
+@pytest.mark.parametrize("extra", [{"generate_answer": True}, {"conversation_id": "chat"}])
+def test_search_is_plain_retrieval_that_never_answers_or_saves_a_turn(tmp_path, extra):
+    from magic_rag.ingest import ingest_sample
+    from scripted_chat_model import ScriptedChatModel
+    path = tmp_path / "cards.db"
+    ingest_sample(path)
+    model = ScriptedChatModel(script=[])
+    with TestClient(create_app(path, chat_model=model)) as client:
+        conversation_id = client.post("/api/conversations").json()["id"]
+        extra = {key: conversation_id if key == "conversation_id" else value for key, value in extra.items()}
+        assert client.post("/api/search", json={"question": "Delver", **extra}).status_code == 422
+        trace = client.post("/api/search", json={"question": "Delver"}).json()
+        assert trace["selected_evidence"][0]["card_id"] == "sample-delver"
+        assert not {"generation", "answer_context", "conversation_id", "turn_id"} & trace.keys()
+        assert client.get(f"/api/conversations/{conversation_id}").json()["turns"] == []
+    assert model.calls == []
 
 
 def test_sample_search_retains_all_faces_and_collapses_printings(tmp_path):
@@ -22,7 +40,7 @@ def test_sample_search_retains_all_faces_and_collapses_printings(tmp_path):
     ingest_sample(path)
     with TestClient(create_app(path)) as client:
         trace = client.post("/api/search", json={"question": "Delver"}).json()
-        assert len(trace["stages"]["keyword"]) == 1
+        assert len(trace["searches"][0]["stages"]["keyword"]) == 1
         card = trace["selected_evidence"][0]
         assert card["name"] == "Delver of Secrets // Insectile Aberration"
         assert "Flying" in card["text"]
@@ -39,7 +57,7 @@ def test_keyword_ranking_literal_syntax_and_request_validation(tmp_path):
     ingest_sample(path)
     with TestClient(create_app(path)) as client:
         trace = client.post("/api/search", json={"question": '"Lightning Bolt" (Sol)'}).json()
-        cards = trace["stages"]["keyword"]
+        cards = trace["searches"][0]["stages"]["keyword"]
         assert cards[0]["name"] == "Lightning Bolt"
         assert [c["rank"] for c in cards] == [1, 2]
         assert cards[0]["score"] < cards[1]["score"]
@@ -79,7 +97,7 @@ def test_exact_name_precedes_split_card_despite_raw_scores(tmp_path, mode, limit
         })
         assert response.status_code == 200
         trace = response.json()
-        for cards in trace["stages"].values():
+        for cards in trace["searches"][0]["stages"].values():
             assert cards[0]["name"] == "Lightning Bolt"
             assert cards[0]["rank"] == 1
             assert len({card["card_id"] for card in cards}) == len(cards)

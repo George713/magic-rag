@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from magic_rag.app import create_app
+from test_streaming import message_trace
 from magic_rag.ingest import ingest_sample
 from test_vectors import ControlledEmbedder
 
@@ -25,8 +26,8 @@ def test_exact_filters_limit_candidates_before_each_branch_ranks(tmp_path, mode)
             "settings": {"keyword_candidates": 1, "vector_candidates": 1}})
         assert response.status_code == 200
         trace = response.json()
-        assert trace["filters"]["colors"] == ["U"]
-        for candidates in trace["stages"].values():
+        assert trace["searches"][0]["filters"]["colors"] == ["U"]
+        for candidates in trace["searches"][0]["stages"].values():
             assert [card["card_id"] for card in candidates] == ["sample-delver"]
         assert trace["selected_evidence"][0]["name"] == "Delver of Secrets // Insectile Aberration"
 
@@ -70,7 +71,7 @@ def test_exact_color_type_and_inclusive_fractional_mana_boundaries(tmp_path, mod
     with TestClient(create_app(path, embedder=ControlledEmbedder(), reranker=FilterReranker())) as client:
         response = client.post("/api/search", json={"question": "fixture", "mode": mode, "filters": filters})
         assert response.status_code == 200
-        for stage in response.json()["stages"].values():
+        for stage in response.json()["searches"][0]["stages"].values():
             assert {card["card_id"] for card in stage} == expected
 
 
@@ -79,14 +80,14 @@ def test_clearing_filters_returns_candidates_and_keeps_saved_trace_constraints(t
     ingest_sample(path, embedder=ControlledEmbedder())
     with TestClient(create_app(path, embedder=ControlledEmbedder())) as client:
         conversation_id = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question": "Sol Ring", "mode": "hybrid", "conversation_id": conversation_id,
-                            "filters": {"colors": ["G"]}}).json()
-        assert all(not candidates for candidates in trace["stages"].values())
+        trace = message_trace(client, **{"question": "Sol Ring", "mode": "hybrid", "conversation_id": conversation_id,
+                            "filters": {"colors": ["G"]}})
+        assert all(not candidates for candidates in trace["searches"][0]["stages"].values())
         cleared = client.post("/api/search", json={"question": "Sol Ring", "mode": "hybrid", "filters": {}}).json()
         assert cleared["selected_evidence"][0]["card_id"] == "sample-sol-ring"
-        assert cleared["filters"] == {}
+        assert cleared["searches"][0]["filters"] == {}
         saved = client.get(f"/api/conversations/{conversation_id}").json()["turns"][0]["trace"]
-        assert saved["filters"] == {"colors": ["G"]}
+        assert saved["searches"][0]["filters"] == {"colors": ["G"]}
 
 
 @pytest.mark.parametrize("filters", [
@@ -123,13 +124,11 @@ def test_legendary_eligibility_precedes_limits_and_exact_names_and_can_be_cleare
     with TestClient(create_app(path, embedder=model, reranker=FilterReranker())) as client:
         conversation = client.post('/api/conversations').json()['id']
         filters = {"legendary": True, "card_types": ["Artifact", "Creature"], "colors": ["U", "R"], "mana_value_min": 2, "mana_value_max": 2}
-        response = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": filters, "conversation_id": conversation, "settings": {"keyword_candidates": 1, "vector_candidates": 1}})
-        assert response.status_code == 200
-        trace = response.json()
-        for candidates in [*trace['stages'].values(), trace['selected_evidence']]:
+        trace = message_trace(client, question="fixture", mode=mode, filters=filters, conversation_id=conversation, settings={"keyword_candidates": 1, "vector_candidates": 1})
+        for candidates in [*trace['searches'][0]['stages'].values(), trace['selected_evidence']]:
             assert [card['card_id'] for card in candidates] == ['legend']
         saved = client.get(f'/api/conversations/{conversation}').json()
-        assert saved['turns'][0]['trace']['filters']['legendary'] is True
+        assert saved['turns'][0]['trace']['searches'][0]['filters']['legendary'] is True
         all_legends = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": {"legendary": True, "card_types": ["Creature"]}}).json()
         assert {card['card_id'] for card in all_legends['selected_evidence']} == {'legend', 'mono', 'faces'}
         cleared = client.post('/api/search', json={"question": "fixture", "mode": mode, "filters": {"legendary": False, "colors": ["U", "R"]}}).json()

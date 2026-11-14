@@ -16,7 +16,7 @@ Equivalent API example:
 {"question":"Sol Ring","mode":"hybrid","settings":{"keyword_candidates":20,"vector_candidates":20,"rrf_constant":60,"evidence_limit":8}}
 ```
 
-`stages.keyword` and `stages.vector` contain raw candidates. `stages.fused` contains deduplicated candidates whose `score` is the fusion score and whose `signals` dictionary preserves only the branches that found that card, each as `{rank, score}`. `rank` on a fused card is its new position. The selected evidence copies those cards without changing identity or readable text.
+Within each entry of `searches`, `stages.keyword` and `stages.vector` contain raw candidates. `stages.fused` contains deduplicated candidates whose `score` is the fusion score and whose `signals` dictionary preserves only the branches that found that card, each as `{rank, score}`. `rank` on a fused card is its new position. The selected evidence copies those cards without changing identity or readable text.
 
 Verification uses FastAPI with real isolated FTS5/sqlite-vec indexes and a deterministic embedding substitute. It covers branch overlap, single-branch candidates, exact fusion ties, empty lexical results, configurable limits, and invalid settings. Browser presentation is checked with:
 

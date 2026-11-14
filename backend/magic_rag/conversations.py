@@ -29,38 +29,52 @@ def timestamp():
     return datetime.now(timezone.utc).isoformat()
 
 
+IN_PROGRESS_STATUSES = {"searching", "generating"}
+TERMINAL_STATUSES = {"completed", "failed"}
+
+
+def turn_state(generation):
+    """A turn is in progress until it completes or fails. A stopped run is deleted, never saved.
+
+    A run without a ready provider completes after its search; its generation keeps the provider status.
+    """
+    status = generation["status"]
+    if status in IN_PROGRESS_STATUSES:
+        return "in_progress"
+    return status if status in TERMINAL_STATUSES else "completed"
+
+
+# Version 2 saves an ordered list of searches per turn. Earlier single-query
+# turns are not migrated: conversations are wiped once when this version first
+# opens a database. Card data, embeddings, and corpus tables are never touched.
+STORAGE_VERSION = 2
+
+
 class ConversationStore:
     def __init__(self, connection):
         self.connection = connection
         with self.connection() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS conversations (
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("CREATE TABLE IF NOT EXISTS conversation_storage (version INTEGER NOT NULL)")
+            stored = db.execute("SELECT max(version) FROM conversation_storage").fetchone()[0]
+            if stored is None or stored < STORAGE_VERSION:
+                db.execute("DROP TABLE IF EXISTS conversation_turns")
+                db.execute("DROP TABLE IF EXISTS conversations")
+                db.execute("DELETE FROM conversation_storage")
+                db.execute("INSERT INTO conversation_storage VALUES (?)", (STORAGE_VERSION,))
+            db.execute("""CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY, title TEXT NOT NULL,
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS conversation_turns (
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    current_filters TEXT NOT NULL DEFAULT '{}',
+                    current_mode TEXT NOT NULL DEFAULT 'keyword')""")
+            db.execute("""CREATE TABLE IF NOT EXISTS conversation_turns (
                     id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
                     question TEXT NOT NULL, state TEXT NOT NULL,
                     trace TEXT NOT NULL, answer TEXT, error TEXT,
                     created_at TEXT NOT NULL,
-                    FOREIGN KEY(conversation_id) REFERENCES conversations(id));
-                CREATE INDEX IF NOT EXISTS turns_by_conversation
-                    ON conversation_turns(conversation_id, created_at);
-            """)
-            db.execute('BEGIN IMMEDIATE')
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(conversations)")}
-            if "current_filters" not in columns:
-                db.execute("ALTER TABLE conversations ADD COLUMN current_filters TEXT")
-                for row in db.execute("SELECT id FROM conversations").fetchall():
-                    latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
-                    filters = json.loads(latest["trace"]).get("filters", {}) if latest else {}
-                    db.execute("UPDATE conversations SET current_filters = ? WHERE id = ?", (json.dumps(filters), row["id"]))
-            if "current_mode" not in columns:
-                db.execute("ALTER TABLE conversations ADD COLUMN current_mode TEXT NOT NULL DEFAULT 'keyword'")
-                for row in db.execute("SELECT id FROM conversations").fetchall():
-                    latest = db.execute("SELECT trace FROM conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (row["id"],)).fetchone()
-                    mode = json.loads(latest["trace"]).get("mode", "keyword") if latest else "keyword"
-                    if mode in ('keyword', 'vector', 'hybrid', 'hybrid_rerank'):
-                        db.execute("UPDATE conversations SET current_mode = ? WHERE id = ?", (mode, row["id"]))
+                    FOREIGN KEY(conversation_id) REFERENCES conversations(id))""")
+            db.execute("""CREATE INDEX IF NOT EXISTS turns_by_conversation
+                    ON conversation_turns(conversation_id, created_at)""")
 
     def create(self):
         now = timestamp()
@@ -106,6 +120,7 @@ class ConversationStore:
         return self.get(conversation_id)
 
     def append_trace(self, conversation_id, trace):
+        """Save a new turn for this trace; its state follows the trace's generation."""
         now = timestamp()
         turn_id = str(uuid4())
         with self.connection() as db:
@@ -114,7 +129,7 @@ class ConversationStore:
                 raise HTTPException(404, "Conversation not found. Start a new conversation.")
             trace.update(conversation_id=conversation_id, turn_id=turn_id)
             generation = trace["generation"]
-            state = generation["status"] if generation["status"] in {"completed", "failed", "cancelled"} else "retrieval_complete"
+            state = turn_state(generation)
             db.execute("INSERT INTO conversation_turns VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                        (turn_id, conversation_id, trace["question"], state,
                         json.dumps(trace), generation.get("text"),
@@ -136,29 +151,50 @@ class ConversationStore:
                 return turn
         raise HTTPException(404, "Conversation turn not found.")
 
-    def recover_interrupted_answers(self):
+    def delete_turn(self, conversation_id, turn_id, *, expected_states=None):
+        """Remove a turn and everything saved with it; returns whether it was removed.
+
+        With `expected_states`, only a turn in one of those states is removed (compare-and-delete).
+        A conversation left without turns gets its default title back, so no trace of the turn remains.
+        """
         with self.connection() as db:
-            interrupted = db.execute("SELECT conversation_id, id, trace FROM conversation_turns WHERE state = 'generating'").fetchall()
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT state FROM conversation_turns WHERE id = ? AND conversation_id = ?", (turn_id, conversation_id)).fetchone()
+            if row is None or (expected_states is not None and row["state"] not in expected_states):
+                return False
+            db.execute("DELETE FROM conversation_turns WHERE id = ?", (turn_id,))
+            db.execute("""UPDATE conversations SET updated_at = ?, title = CASE WHEN EXISTS (
+                    SELECT 1 FROM conversation_turns WHERE conversation_id = ?) THEN title ELSE 'New conversation' END
+                    WHERE id = ?""", (timestamp(), conversation_id, conversation_id))
+            return True
+
+    def remove_interrupted_turns(self):
+        """Runs cut off by a shutdown are stopped runs: nothing from them is kept."""
+        with self.connection() as db:
+            interrupted = db.execute("SELECT conversation_id, id FROM conversation_turns WHERE state = 'in_progress'").fetchall()
         for row in interrupted:
-            generation = json.loads(row["trace"])["generation"]
-            self.update_generation(row["conversation_id"], row["id"],
-                {**generation, "status": "cancelled", "message": "Generation was interrupted by service shutdown. Partial output is incomplete.", "citations": []}, expected_states={"generating"})
+            self.delete_turn(row["conversation_id"], row["id"], expected_states={"in_progress"})
 
     def update_generation(self, conversation_id, turn_id, generation, *, expected_states):
-        """Compare-and-set prevents late deltas from overwriting terminal turn states."""
+        return self.update_trace(conversation_id, turn_id, lambda trace: {**trace, "generation": generation}, expected_states=expected_states)
+
+    def update_trace(self, conversation_id, turn_id, change, *, expected_states):
+        """Compare-and-set prevents late searches, deltas, or completion from overwriting terminal or deleted turns.
+
+        `change` maps the saved trace to its replacement; the turn state follows the new generation.
+        """
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT state, trace FROM conversation_turns WHERE id = ? AND conversation_id = ?", (turn_id, conversation_id)).fetchone()
-            if row is None:
-                raise HTTPException(404, "Conversation turn not found.")
-            if row["state"] not in expected_states:
+            if row is None or row["state"] not in expected_states:
+                # A Stop may delete the turn while its run is still writing.
                 return False
-            trace = json.loads(row["trace"])
-            trace["generation"] = generation
-            state = generation["status"] if generation["status"] in {"generating", "completed", "cancelled", "failed"} else "retrieval_complete"
+            trace = change(json.loads(row["trace"]))
+            generation = trace["generation"]
+            state = turn_state(generation)
             db.execute("UPDATE conversation_turns SET state = ?, trace = ?, answer = ?, error = ? WHERE id = ? AND conversation_id = ?",
                        (state, json.dumps(trace), generation.get("text"),
-                        generation.get("message") if generation["status"] == "failed" else None,
+                        generation.get("message") if state == "failed" else None,
                         turn_id, conversation_id))
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (timestamp(), conversation_id))
             return True

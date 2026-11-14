@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from magic_rag.app import create_app
+from test_streaming import message_trace
 from test_vectors import ControlledEmbedder
 import sqlite3
 import gzip
@@ -40,11 +41,11 @@ def test_refresh_during_hybrid_search_keeps_both_branches_on_one_corpus_snapshot
         model.refresh = activate_during_query
         before = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid"}).json()
         assert before["corpus"]["id"] == "snapshot-one"
-        assert {card["card_id"] for branch in ("keyword", "vector") for card in before["stages"][branch]} == {"canonical-one"}
+        assert {card["card_id"] for branch in ("keyword", "vector") for card in before["searches"][0]["stages"][branch]} == {"canonical-one"}
         assert client.get("/api/corpus").json()["id"] == "snapshot-two"
         after = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid"}).json()
         assert after["corpus"]["id"] == "snapshot-two"
-        assert {card["card_id"] for branch in ("keyword", "vector") for card in after["stages"][branch]} == {"canonical-two"}
+        assert {card["card_id"] for branch in ("keyword", "vector") for card in after["searches"][0]["stages"][branch]} == {"canonical-two"}
 
 
 def test_import_collapses_printings_retains_all_faces_and_canonical_fields(tmp_path):
@@ -70,7 +71,7 @@ def test_successful_refresh_and_later_failure_preserve_active_search_and_histori
     with TestClient(create_app(path, embedder=ControlledEmbedder(), corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation_id = client.post("/api/conversations").json()["id"]
-        original = client.post("/api/search", json={"question":"Final ability", "conversation_id":conversation_id}).json()
+        original = message_trace(client, **{"question":"Final ability", "conversation_id":conversation_id})
         metadata, records = source.snapshot()
         changed = [{**records[0], "name":"Replacement Source"}]
         source.snapshot = lambda: ({**metadata,"id":"snapshot-two"},changed)
@@ -144,7 +145,7 @@ def test_database_failure_at_activation_rolls_back_both_indexes_and_corpus_ident
         assert "controlled activation failure" in response.json()["detail"]
         after = client.post("/api/search",json={"question":"Final ability","mode":"hybrid"}).json()
         assert after["corpus"] == before["corpus"]
-        assert after["stages"] == before["stages"]
+        assert after["searches"][0]["stages"] == before["searches"][0]["stages"]
 
 
 def test_download_uses_current_gzip_jsonl_contract_and_rejects_incomplete_export(tmp_path):
@@ -198,12 +199,12 @@ def test_source_images_survive_retrieval_and_saved_snapshot_refresh(tmp_path):
     with TestClient(create_app(path, embedder=ControlledEmbedder(), corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question":"Final ability", "mode":"hybrid", "conversation_id":conversation}).json()
+        trace = message_trace(client, **{"question":"Final ability", "mode":"hybrid", "conversation_id":conversation})
         card = trace["selected_evidence"][0]
         assert card["images"] == [{"name":"Front", "url":"https://cards.example/front.jpg"}, {"name":"Back", "url":"https://cards.example/back.jpg"}]
         assert card["source_url"] == "https://scryfall.com/card/set/1"
         assert "Final ability." in card["text"]
-        assert trace["stages"]["vector"][0]["images"] == card["images"]
+        assert trace["searches"][0]["stages"]["vector"][0]["images"] == card["images"]
         replacement = {**original, "image_uris":{"normal":"https://cards.example/new.jpg"}, "card_faces":[] , "colors":["U"], "type_line":"Creature", "oracle_text":"Final ability."}
         source.snapshot = lambda: ({**metadata, "id":"replacement"}, [replacement])
         assert client.post("/api/corpus/import").status_code == 200
@@ -217,9 +218,9 @@ def test_legacy_database_and_saved_turn_without_images_remain_readable(tmp_path)
     ingest_sample(path)
     with TestClient(create_app(path)) as client:
         conversation = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question":"Lightning Bolt", "conversation_id":conversation}).json()
+        trace = message_trace(client, **{"question":"Lightning Bolt", "conversation_id":conversation})
     # Seed the pre-extension storage format at the database boundary.
-    for cards in [trace["selected_evidence"], *trace["stages"].values()]:
+    for cards in [trace["selected_evidence"], *trace["searches"][0]["stages"].values()]:
         for card in cards:
             card.pop("images", None)
             card.pop("source_url", None)
@@ -250,9 +251,8 @@ def test_import_does_not_expose_non_https_image_or_source_urls(tmp_path):
 
 
 def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restart(tmp_path):
-    class AssetProvider:
-        async def stream_answer(self, question, evidence, session_id, **kwargs):
-            yield {"result": {"assets": [evidence[0]["card_id"]]}}
+    from scripted_chat_model import DONE_SEARCHING, search_once, ScriptedChatModel, search_call
+    model = ScriptedChatModel(script=[search_call("Final ability"), DONE_SEARCHING, lambda call: {"assets": [call.source["selected_evidence"][0]["card_id"]]}])
 
     source = FixtureSource()
     metadata, records = source.snapshot()
@@ -260,11 +260,10 @@ def test_streamed_assets_keep_source_face_images_after_corpus_refresh_and_restar
     records[0]["card_faces"][1]["image_uris"] = {"normal": "https://cards.example/back.jpg"}
     source.snapshot = lambda: (metadata, records)
     path = tmp_path / "assets.db"
-    with TestClient(create_app(path, embedder=ControlledEmbedder(), provider=AssetProvider(), corpus_source=source)) as client:
+    with TestClient(create_app(path, embedder=ControlledEmbedder(), chat_model=model, corpus_source=source)) as client:
         assert client.post("/api/corpus/import").status_code == 200
         conversation_id = client.post("/api/conversations").json()["id"]
-        trace = client.post("/api/search", json={"question": "Final ability", "conversation_id": conversation_id}).json()
-        response = client.post(f"/api/conversations/{conversation_id}/turns/{trace['turn_id']}/stream")
+        response = client.post(f"/api/conversations/{conversation_id}/messages", json={"question": "Final ability"})
         answer = json.loads(response.text.splitlines()[-1])["generation"]
         assert answer["status"] == "completed"
         assert answer["assets"][0]["images"] == [{"name": "Front", "url": "https://cards.example/front.jpg"}, {"name": "Back", "url": "https://cards.example/back.jpg"}]

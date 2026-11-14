@@ -1,14 +1,51 @@
 # Remote card explanations
 
-Sending a message retrieves cards and requests a streamed answer from the exact selected evidence. Validated citations remain in the answer data; the interface exposes supporting card text through that turn's Retrieved evidence disclosure instead of a Sources line. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
+Sending a message runs the [card-search agent](conversational-queries.md): the model writes up to three card searches, then a separate request streams the answer from the combined evidence of those searches. Validated citations remain in the answer data; the interface exposes supporting card text through that turn's Retrieved evidence disclosure instead of a Sources line. An absent, failed, or unverified provider leaves retrieval available. Empty evidence produces an explicit insufficient-evidence response without a remote call.
 
 The browser now uses [streamed saved-turn answers and Stop](streaming.md). The synchronous search option described below remains available to API clients.
 
-Answers receive the original user question, actual retrieval query, and a frozen conversational-context snapshot separately from selected card evidence. The snapshot contains at most six earlier turns from that conversation, completed answers only, a 16,000-character history budget, and a 4,000-character limit per older text field. Any clipping or omitted older context is recorded as `answer_context.context_truncated`; the original submitted question, actual query, and card evidence remain complete. Failed/cancelled partial answers and turns added after retrieval are excluded. Both synchronous and streamed generation use the same saved snapshot.
+Answers receive the original user question, the message's search queries, and a frozen conversational-context snapshot separately from the combined card evidence. The snapshot contains at most six earlier completed turns from that conversation, a 16,000-character history budget, and a 4,000-character limit per older text field. Any clipping or omitted older context is recorded as `answer_context.context_truncated`; the original submitted question, search queries, and card evidence remain complete. Failed turns and turns added after the message started are excluded; stopped turns are deleted and never appear.
 
 ## Provider prerequisite
 
-Checked 2026-10-25: [OpenCode Go's workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) requests typical coding-agent traffic. Magic card Q&A suitability is unresolved. The [inference API](https://opencode.ai/v2/docs/console/api/inference/) documents compatible HTTP interfaces, but this does not establish workload suitability. No Go generation request was sent, no paid alternative was selected, and no live-provider smoke test was run. Confirm suitability with the provider before enabling requests.
+Checked 2026-10-25: [OpenCode Go's workload guidance](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it) requests typical coding-agent traffic. The [inference API](https://opencode.ai/v2/docs/console/api/inference/) documents compatible HTTP interfaces, but this does not establish workload suitability. The maintainer set `MAGIC_RAG_PROVIDER_SUITABILITY_CONFIRMED` locally; that flag records the maintainer's decision and is not provider approval.
+
+### Live tool-calling smoke test
+
+`scripts/smoke_provider_tool_calls.py` is a manual check outside the automated suite. It reads the `MAGIC_RAG_PROVIDER_*` variables from the repository `.env` (process environment overrides; `--env-file` selects another file). It refuses to run, exit code 2, unless the suitability flag is `true`. It then sends one tool-calling request through LangChain's `ChatOpenAI` with a single `search_cards(query: str)` tool, repeats it as a streamed request, and reports whether each returns a well-formed `search_cards` call with a non-empty `query` string and a call ID. Credentials are never printed. The application's full chat-completions URL is converted to the API base LangChain expects by removing the `/chat/completions` suffix.
+
+```powershell
+uv run python scripts/smoke_provider_tool_calls.py            # add --no-stream to skip the streamed check
+```
+
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go:
+
+- **Outcome: tool calls work.** On two consecutive runs, both the non-streamed and streamed requests returned exactly one `search_cards` call with `finish_reason='tool_calls'`, a call ID, and a model-written query (for example `{"query": "red instant deal 3 damage to creature"}`) for the question "a red instant that deals 3 damage to a creature".
+- **Streaming:** Streamed tool-call chunks (6–7 per response) merged into a complete, parseable call with no `invalid_tool_calls`.
+- **Quirk: session header required.** Requests without an `x-opencode-session` header fail with HTTP 400 ("Request is missing x-opencode-session and cannot be routed efficiently"). Go's client guidance asks clients to send a stable session ID per conversation and an application-specific user agent. The script sends a fresh UUID per run and `User-Agent: magic-rag/0.1`. The application sends the same headers, with the conversation ID as the session ID.
+- The model chose to call the tool without `tool_choice` forcing. Answer quality and citation behavior were not tested.
+
+### Live application check
+
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the FastAPI application (in-process, a copy of the full local corpus, keyword mode, credentials from `.env`):
+
+- **Outcome: cited answers work through LangChain's chat model.** The synchronous answer to "What does Lightning Bolt do?" completed with validated citations (Lightning Bolt and the Lightning Bolt face of Emeritus of Conflict) and accurate card text.
+- **Follow-up query (superseded design):** this run predates the agent. A separate rewrite call, since removed, turned the follow-up "Which of those costs less than 2 mana?" into "Does Lightning Bolt cost less than 2 mana?". The agent runs below now write all queries.
+- **Streaming:** the follow-up's streamed answer arrived in 80 text deltas and completed with four validated citations, using the JSON-object response format through LangChain's streamed path.
+- Prose correctness was checked by eye on this one exchange only; it is not an evaluation of answer quality.
+
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the agent graph and the streamed-message endpoint (in-process FastAPI, a copy of the full local corpus, keyword mode, search limit 1, credentials from `.env`):
+
+- **Outcome: model-written searches and cited streamed answers work.** For the first-turn question "something red that kills a small creature at instant speed", the model called `search_cards` (with `tool_choice: "required"`) with the query "deals damage to target creature instant red" (8 cards), then the separate JSON-format answer streamed in 68 text deltas and completed with three validated citations (Slaying Fire, Searing Barrage, Chandra's Defeat).
+- **Follow-up:** "which of those costs only one mana?" received bounded context; the model searched "Chandra's Defeat" and the answer completed with validated citations. With one search, it could not look up the other earlier cards.
+- **Out of scope:** "Build me the best burn deck around Lightning Bolt" searched "Lightning Bolt"; the answer declined deck building and explained the retrieved cards with validated citations.
+- Tool calls and the JSON response format were never combined in one request. Answer quality was checked by eye on these three questions only.
+
+Recorded run, 2026-11-14, model `glm-5.3-flash` on OpenCode Go, through the agent graph and the streamed-message endpoint (in-process FastAPI, a copy of the full local corpus, keyword mode, search limit 3, credentials from `.env`):
+
+- **Outcome: the model searches once per compared card.** "compare Lightning Bolt and Shock" produced two searches in order, "Lightning Bolt" (8 cards) and "Shock" (5 cards). The combined evidence held 13 cards, and the streamed answer (77 text deltas) completed with validated citations of Lightning Bolt and Shock and accurate card text.
+- **Second comparison:** "how does Llanowar Elves compare with Elvish Mystic?" searched "Llanowar Elves" and "Elvish Mystic" (8 cards each, 16 combined, within the cap of 16). The answer completed with citations of both cards and called them functionally identical, which matches the card text.
+- Neither question used the third search, so the search limit was never reached live; the limit is covered by deterministic tests only. Answer quality was checked by eye on these two questions only.
 
 ## Server configuration
 
@@ -23,14 +60,16 @@ $env:MAGIC_RAG_PROVIDER_SUITABILITY_CONFIRMED = 'true'
 uv run python -m magic_rag serve
 ```
 
-There is no default endpoint, model, or paid service. The adapter implements Chat Completions JSON responses; other API families need another adapter. The endpoint must support JSON-object response format. HTTP loopback is allowed for local test providers; other endpoints require HTTPS. Credentials are sent in the Authorization header and never included in the browser status, traces, or exception messages. Environment variables are read at service startup; `.env` files are not loaded automatically.
+There is no default endpoint, model, or paid service. Answer generation (synchronous and streamed) and the card-search agent's tool calls run through LangChain's OpenAI-compatible chat model (`ChatOpenAI`), built in `magic_rag.providers` from these variables. The configured value is the full chat-completions URL; the `/chat/completions` suffix is removed to form LangChain's API base. Every request sends `User-Agent: magic-rag/0.1` and the conversation ID as `x-opencode-session`. The agent's search requests bind one `search_cards` tool (the first with `tool_choice: "required"`) and no response format; the answer is a separate request with the JSON-object response format, which the endpoint must support, and no tools. Requests time out after 60 seconds and are not retried. HTTP loopback is allowed for local test providers; other endpoints require HTTPS. Credentials are sent in the Authorization header and never included in the browser status, traces, or exception messages. Environment variables are read at service startup; `.env` files are not loaded automatically.
 
-The UI's provider status comes from `GET /api/provider`. `POST /api/search` accepts `generate_answer: true` and uses whichever retrieval mode selected the evidence. `trace.generation` includes `status`, a safe message, and, on success, `text`, `insufficient_evidence`, and validated `{card_id,name}` citations. Unknown card citations, malformed answer payloads, and uncited supported answers fail explicitly while preserving evidence. Card text cannot establish every rules interaction; the prompt and UI state that explanations are not authoritative rulings. Validation establishes citation identity, not truth of generated claims; real-model review is still required.
+The UI's provider status comes from `GET /api/provider`. Answers are generated only by the agent for streamed messages; `POST /api/search` never generates one. `trace.generation` includes `status`, a safe message, and, on success, `text`, `insufficient_evidence`, and validated `{card_id,name}` citations. Citations or assets outside the combined evidence, malformed answer payloads, and uncited supported answers fail explicitly while preserving evidence. Card text cannot establish every rules interaction; the prompt and UI state that explanations are not authoritative rulings. Validation establishes citation identity, not truth of generated claims; real-model review is still required.
 
 ## Validation
 
-The answer JSON contract accepts optional `text`, `citations`, `insufficient_evidence`, and `assets` (a list of selected-evidence card IDs). Text-only, assets-only, and combined responses are supported. Usable text or at least one selected asset is required; supported prose still requires citations. Unknown fields, invented IDs, and model-supplied image URLs fail validation. The service resolves assets to the turn's saved card metadata only after successful completion; partial or cancelled streams do not publish validated assets. Source metadata may be absent on older saved turns, which remain readable. Validation does not establish the truth of prose or the availability of external images.
+The answer JSON contract accepts optional `text`, `citations`, `insufficient_evidence`, and `assets` (a list of selected-evidence card IDs). Text-only, assets-only, and combined responses are supported. Usable text or at least one selected asset is required; supported prose still requires citations. Unknown fields, invented IDs, and model-supplied image URLs fail validation. The service resolves assets to the turn's saved card metadata only after successful completion; partial, failed, or stopped streams do not publish validated assets. Source metadata may be absent on older saved turns, which remain readable. Validation does not establish the truth of prose or the availability of external images.
 
-`uv run pytest backend/tests/test_generation.py` exercises the FastAPI seam with isolated real SQLite and deterministic provider substitutes, including the actual HTTP adapter with a substituted external transport. Browser tests cover unavailable-provider evidence retention and access through the evidence disclosure. These tests do not establish remote model quality or live Go support.
+## Deterministic verification versus live checks
 
-When workload approval and credentials are available, run a separate smoke check using a known card query, inspect the answer's citations and insufficient-evidence behavior, and record model, date, and outcome without the key. Until then, the live integration remains unverified.
+`uv run pytest backend/tests/test_generation.py` (with `test_agent.py`, `test_multisearch.py`, and `test_streaming.py` for the agent) exercises the FastAPI seam with isolated real SQLite. The chat model is the single substitution point: tests pass `create_app(chat_model=...)` a deterministic scripted LangChain chat model (`backend/tests/scripted_chat_model.py`) that returns predetermined answers, streamed fragments, failures, or tool calls, and records each request. No routine check makes a remote call. Browser tests cover unavailable-provider evidence retention and access through the evidence disclosure. These tests do not establish remote model quality.
+
+Live checks run separately from the automated suite: the tool-calling smoke script and the recorded application runs above. They are the only evidence that the real provider handles tool calls, the agent loop, and streamed answers, and they cover a handful of questions on one date and model. Passing deterministic tests is never reported as live verification. Record each new live run with model, date, and outcome, without the key.

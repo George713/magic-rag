@@ -28,7 +28,7 @@ The local database was backed up to `data/cards-before-image-repair.db` and repa
 
 Verification for this follow-up: backend tests cover unsent mode preferences, restart independence, historical snapshots, legacy-mode migration, metadata repair of saved selections and future searches, repeat repair, unsafe URLs, download failure, and transaction rollback. Browser tests cover per-chat mode navigation/reload, independent historical details, collapsed evidence, correct-turn citation expansion/scrolling, visible assets, both faces, enlargement, reopening, and image-load failure.
 
-Follow-up results: **192 backend tests passed, 2 optional real-model tests skipped; 22 browser tests passed** across the standard, workspace, chat, streaming, filters, rewriting, vector, hybrid, and reranking configurations. `npm run check` reports zero errors/warnings and `npm run build` passes. The checks use deterministic answer providers; the live-provider boundary described below is unchanged.
+Follow-up results: **192 backend tests passed, 2 optional real-model tests skipped; 22 browser tests passed** across the standard, workspace, chat, streaming, filters, rewriting (since replaced by the agent suite), vector, hybrid, and reranking configurations. `npm run check` reports zero errors/warnings and `npm run build` passes. The checks use deterministic answer providers; the live-provider boundary described below is unchanged.
 
 ## Card rows and frameless enlargement
 
@@ -73,7 +73,7 @@ PR #28 subsequently merged first on 2026-10-26, bringing PR #24's application ch
 
 ## Verification boundaries
 
-FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source, and provider substitutes. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks do not establish live OpenCode Go support. Workload suitability and credentials remain unresolved; no live model request or paid fallback is used.
+FastAPI tests use real temporary SQLite, FTS5, and sqlite-vec with deterministic external embedding, reranking, source substitutes and a scripted chat model. Browser tests run SvelteKit and FastAPI; images and model responses are deterministic. These checks make no live model request; live checks are recorded in the [provider guide](providers.md).
 
 API coverage is in `backend/tests/test_conversations.py`, `test_filters.py`, `test_corpus.py`, `test_generation.py`, `test_streaming.py`, and `test_answer_context.py`. Browser verification and acceptance assessment are recorded below after integration.
 
@@ -100,12 +100,12 @@ Standards and specification reviews independently examined `94254c8...d268b8c` a
 
 ## Reproduce browser checks
 
-From `web`, run `npx playwright test` and each configuration: `playwright.workspace.config.ts`, `playwright.chat.config.ts`, `playwright.streaming.config.ts`, `playwright.filters.config.ts`, `playwright.rewriting.config.ts`, `playwright.vector.config.ts`, `playwright.hybrid.config.ts`, and `playwright.reranking.config.ts`. Each configuration runs isolated local service processes and ignored test databases. API checks: `uv run pytest`; frontend checks: `npm run check` and `npm run build`.
+From `web`, run `npx playwright test` and each configuration: `playwright.workspace.config.ts`, `playwright.chat.config.ts`, `playwright.streaming.config.ts`, `playwright.filters.config.ts`, `playwright.agent.config.ts`, `playwright.vector.config.ts`, `playwright.hybrid.config.ts`, and `playwright.reranking.config.ts`. Each configuration runs isolated local service processes and ignored test databases. API checks: `uv run pytest`; frontend checks: `npm run check` and `npm run build`.
 
 ## Final results
 
 - Backend: **175 passed, 2 skipped**. The skipped tests require explicit real-model execution; deterministic integration checks passed.
-- Browser: **21 passed** across standard (4), workspace (2), chat/assets (5), streaming (4), filters (2), rewriting (1), vector (1), hybrid (1), and reranking (1).
+- Browser: **21 passed** across standard (4), workspace (2), chat/assets (5), streaming (4), filters (2), rewriting (1, since replaced by the agent suite), vector (1), hybrid (1), and reranking (1).
 - Frontend: `npm run check` has zero errors and warnings; production build passes.
 - Reviewed desktop and 390px mobile screenshots; transcript and side panels stay within the viewport.
 - Required live-provider limitation remains visible: deterministic application verification does not establish OpenCode Go workload suitability or live model quality.

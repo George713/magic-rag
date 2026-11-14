@@ -121,7 +121,7 @@ def latency_summary(values):
 def run_benchmark(request, search, search_request):
     try:
         prepared = {question.id:{mode:search_request(question=question.question, mode=mode,
-                    filters=question.filters, settings={**PRESET,**request.settings}, generate_answer=False)
+                    filters=question.filters, settings={**PRESET,**request.settings})
                     for mode in MODES} for question in request.suite.questions}
     except ValidationError as exc:
         raise HTTPException(422, "Invalid benchmark question, filters, or retrieval settings. " + "; ".join(error["msg"] for error in exc.errors())) from exc
@@ -140,7 +140,7 @@ def run_benchmark(request, search, search_request):
         if corpus is not None and trace["corpus"] != corpus:
             raise HTTPException(409, "Corpus changed during the benchmark. Repeat against one stable corpus.")
         corpus = trace["corpus"]
-        for name, config in trace["models"].items():
+        for name, config in (item for search in trace["searches"] for item in search["models"].items()):
             if name in models and models[name] != config:
                 raise HTTPException(409, "Model configuration changed during the benchmark.")
             models[name] = config

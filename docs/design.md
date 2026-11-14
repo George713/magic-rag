@@ -1,6 +1,6 @@
 # Magic RAG proof of concept
 
-Status: local retrieval, persistent conversations, provider boundaries, streaming, filters, and corpus import are implemented. Scryfall's current export contract and local model execution have been verified. OpenCode Go workload suitability remains unresolved; deterministic provider tests do not establish live subscription support.
+Status: local retrieval, the card-search agent, persistent conversations, provider boundaries, streaming, filters, and corpus import are implemented. Scryfall's current export contract and local model execution have been verified. OpenCode Go workload suitability remains the maintainer's decision. Deterministic tests with a scripted chat model establish application behavior. Live provider support, including tool calls, rests only on the dated manual runs in [provider live checks](providers.md).
 
 ## Requested outcome
 
@@ -62,8 +62,8 @@ The same embedding model and compatible configuration encode stored cards and in
 ## Accepted application decisions
 
 - Q17: SvelteKit chat interface and server routes forwarding to a local Python FastAPI service. Python owns retrieval, model inference, ingestion, answer-provider calls, and persistence. Provider credentials remain server-side.
-- Q18: use conversation history in an additional remote-model call to produce a standalone retrieval query for follow-ups. Show the rewritten query in the inspector. Explicit filters persist until changed. This adds model usage and latency.
-- Q19: stream generated answers with a Stop button. Retrieval and its inspector remain usable independently when the remote model is unconfigured or unavailable. Show provider errors clearly and retain retrieved results.
+- Q18: superseded by the [agent-written searches](#accepted-card-search-agent) below. Originally, follow-ups used an additional remote-model call to produce a standalone retrieval query. Explicit filters still persist until changed.
+- Q19: stream generated answers with a Stop button. Retrieval and its inspector remain usable independently when the remote model is unconfigured or unavailable. Show provider errors clearly and retain retrieved results of failed turns. Stop removes the turn entirely (amended by the card-search agent below).
 
 ## Accepted chat interface extension
 
@@ -126,6 +126,20 @@ Tracked in [specification #25: Simplify chat card rows and frameless image enlar
 - Apply the enlargement presentation consistently to answer assets and images inside Retrieved evidence. The single-row layout requirement applies to the answer's selected card assets.
 - Keep a plain, unlinked card name when a selected asset has no image metadata. Preserve readable image-load errors and access to evidence.
 - Verify at the existing Playwright chat browser seam with deterministic responses and realistically sized images. Cover desktop/mobile overflow, captions, both faces, saved chats, all closing interactions, and focus restoration; inspect screenshots for the transparent presentation and dark backdrop. Replace assertions requiring the removed links. No new backend testing seam is needed.
+
+## Accepted card-search agent
+
+Accepted in the 2026-11-14 design interview. Tracked in [specification #30: LangGraph agent that writes its own card searches](https://github.com/George713/magic-rag/issues/30). The graph's shape is recorded in [ADR 0005](adr/0005-hand-built-agent-graph-with-a-search-limit.md).
+
+- A hand-built LangGraph `StateGraph` with an agent node and a search node writes every search query, on the first message and on follow-ups. It replaces the separate follow-up rewrite call and the single-search pipeline. The fixed pipeline is not kept as a mode.
+- At most three searches per message. The answer is a separate request without tools, drawing on the deduplicated union of all searches' cards, taken by rank across searches and capped at twice the per-search evidence limit (16 by default). Citations and card assets must reference that combined evidence. A message with N searches makes N + 2 model calls below the limit and 4 at the limit.
+- The search tool takes only a query. The application applies the player's explicit filters and search mode to every search.
+- No checkpointer and no sub-agents. The SQLite conversation store is the single record. Each message runs the graph fresh with the last six completed turns as bounded context.
+- Without a ready provider, one search runs on the typed text as-is and its results are shown without an answer.
+- One streamed request per message: `start`, a `search` event per search, answer deltas, then `done`. Turns are `in_progress`, `completed`, or `failed`. Stop, or the connection closing, deletes the turn and saves nothing from the run. A provider failure partway through saves the turn as failed. See [streaming](streaming.md) and [agent-written searches](conversational-queries.md).
+- The live search lines fold into an "N searches" summary that opens per-search retrieval details. Reopening a chat shows the same searches.
+- Saved conversations from before this change were wiped once; card data and embeddings were kept.
+- Verification: automated tests use a deterministic scripted chat model and never call a remote model. A manual tool-calling smoke test and live agent runs against OpenCode Go are recorded separately in [provider live checks](providers.md).
 
 ## Decision records
 

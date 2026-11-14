@@ -1,24 +1,21 @@
 import os
 import json
-import re
 import sqlite3
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 from contextlib import contextmanager
-from anyio import from_thread
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from magic_rag.providers import generate_answer, provider_status, provider_from_env
+from pydantic import BaseModel, ConfigDict, Field
+from magic_rag.providers import ChatModelProvider, provider_status, provider_from_env
 from .vectors import BgeEmbedder, Embedder, EmbeddingError, load_vec, search_vectors
-from .retrieval import exact_name_match, fuse
+from .retrieval import combined_evidence, exact_name_match, fuse, query_words
 from .conversations import register_conversations
 from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 from .evaluation import register_evaluation
-from .rewriting import conversation_context, freeze_answer_context, rewrite_query
 
 
 def default_db_path() -> Path:
@@ -62,24 +59,28 @@ class RetrievalSettings(BaseModel):
     rerank_candidates: int = Field(default=40, ge=1, le=1000)
 
 
-class SearchRequest(BaseModel):
+class MessageRequest(BaseModel):
+    """One message in a conversation. Omitted filters/mode inherit the conversation's current preferences."""
     question: str = Field(min_length=1, max_length=10000)
     mode: str = "keyword"
     settings: RetrievalSettings = Field(default_factory=RetrievalSettings)
-    generate_answer: bool = False
-    conversation_id: str | None = None
     filters: ExactFilters = Field(default_factory=ExactFilters)
 
 
-def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, provider=None, corpus_source=None) -> FastAPI:
-    provider = provider if provider is not None else provider_from_env()
+class SearchRequest(MessageRequest):
+    """Plain synchronous retrieval of the typed text, for scripts and evaluation: no conversation turn, no answer."""
+    model_config = ConfigDict(extra="forbid")
+
+
+def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, chat_model=None, corpus_source=None) -> FastAPI:
+    # The chat model is the only model substitution point; without one, the server configuration decides.
+    provider = ChatModelProvider(chat_model) if chat_model is not None else provider_from_env()
     path = Path(db_path or default_db_path())
     with connect(path) as db:
         # A refresh can commit while an in-flight search retains its read snapshot.
         db.execute("PRAGMA journal_mode=WAL")
     app = FastAPI(title="Magic RAG", version="0.1.0")
     conversations = register_conversations(app, lambda: connect(path))
-    register_streaming(app, conversations, provider)
     embedding_model = embedder or BgeEmbedder()
     reranking_model = reranker or MiniLmReranker()
     from .corpus import register_corpus
@@ -96,85 +97,90 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                     "sqlite_vec_version": db.execute("SELECT vec_version()").fetchone()[0],
                     "fts5": True, "card_count": db.execute("SELECT count(*) FROM cards").fetchone()[0]}
 
-    @app.post("/api/search")
-    def search(request: SearchRequest):
-        turns = []
-        conversation = None
-        if request.conversation_id is not None:
-            conversation = conversations.get(request.conversation_id)
-            turns = conversation["turns"]
-        filters = request.filters
-        if conversation is not None and "filters" not in request.model_fields_set:
-            filters = ExactFilters.model_validate(conversation["current_filters"])
-        mode = conversation['current_mode'] if conversation is not None and 'mode' not in request.model_fields_set else request.mode
+    def run_search(db, query, mode, filters, settings):
+        """One search: its query, the snapshot of mode/filters it ran under, stage rankings, timings, and selected cards."""
         start = perf_counter()
-        if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
-            raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
-        tokens = re.findall(r"[^\W_]+", request.question, flags=re.UNICODE)
-        if not tokens:
-            raise HTTPException(422, "Enter at least one word to search.")
-        trace_id = str(uuid4())
-        query, rewrite = from_thread.run(rewrite_query, provider, request.question,
-                                        conversation_context(turns), request.conversation_id or trace_id)
-        answer_context = freeze_answer_context(query, turns)
-        tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
+        tokens = query_words(query)
         expression = " OR ".join('"' + token + '"' for token in tokens)
         eligibility, filter_parameters = filters.sql()
         stages = {}
         timings = {}
-        with connect(path) as db:
-            db.execute("BEGIN")
-            corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            branches = ("keyword", "vector") if mode in ("hybrid", "hybrid_rerank") else (mode,)
-            for branch in branches:
-                stage_start = perf_counter()
-                try:
-                    rows = search_vectors(db, query, embedding_model, request.settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
-                        FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                        WHERE card_fts MATCH ? AND {eligibility}
-                        ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
-                        (expression, *filter_parameters, query, request.settings.keyword_candidates)).fetchall()
-                except EmbeddingError as exc:
-                    raise HTTPException(422, str(exc)) from exc
-                stages[branch] = []
-                for rank, row in enumerate(rows, 1):
-                    card = dict(row)
-                    card["colors"] = json.loads(card["colors"])
-                    presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
-                    card["images"] = json.loads(presentation["images"]) if presentation else []
-                    card["source_url"] = presentation["source_url"] if presentation else None
-                    card["rank"] = rank
-                    stages[branch].append(card)
-                timings[branch] = (perf_counter() - stage_start) * 1000
+        branches = ("keyword", "vector") if mode in ("hybrid", "hybrid_rerank") else (mode,)
+        for branch in branches:
+            stage_start = perf_counter()
+            try:
+                rows = search_vectors(db, query, embedding_model, settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
+                    FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
+                    WHERE card_fts MATCH ? AND {eligibility}
+                    ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
+                    (expression, *filter_parameters, query, settings.keyword_candidates)).fetchall()
+            except EmbeddingError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            stages[branch] = []
+            for rank, row in enumerate(rows, 1):
+                card = dict(row)
+                card["colors"] = json.loads(card["colors"])
+                presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
+                card["images"] = json.loads(presentation["images"]) if presentation else []
+                card["source_url"] = presentation["source_url"] if presentation else None
+                card["rank"] = rank
+                stages[branch].append(card)
+            timings[branch] = (perf_counter() - stage_start) * 1000
         if mode in ("hybrid", "hybrid_rerank"):
             fusion_start = perf_counter()
-            stages["fused"] = fuse(stages, request.settings.rrf_constant, query=query)
+            stages["fused"] = fuse(stages, settings.rrf_constant, query=query)
             timings["fusion"] = (perf_counter() - fusion_start) * 1000
         candidates = stages["fused" if mode in ("hybrid", "hybrid_rerank") else mode]
         if mode == "hybrid_rerank":
             rerank_start = perf_counter()
             try:
-                stages["reranked"] = rerank(query, candidates[:request.settings.rerank_candidates], reranking_model)
+                stages["reranked"] = rerank(query, candidates[:settings.rerank_candidates], reranking_model)
             except RerankingError as exc:
                 raise HTTPException(422, str(exc)) from exc
             candidates = stages["reranked"]
             timings["reranking"] = (perf_counter() - rerank_start) * 1000
-        trace = {"trace_id": trace_id, "question": request.question, "query": query,
-                "mode": mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
+        return {"query": query, "mode": mode, "filters": filters.model_dump(exclude_defaults=True),
                 "models": {**({"embedding": embedding_model.config} if mode != "keyword" else {}), **({"reranker":reranking_model.config} if mode == "hybrid_rerank" else {})},
-                "settings": {**request.settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
-                "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
-                "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
-                "rewrite": rewrite,
-                "answer_context":answer_context,
-                "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
-        if request.conversation_id is not None:
-            if {"filters", "mode"} & request.model_fields_set:
-                conversations.update_preferences(request.conversation_id,
-                    filters=filters if "filters" in request.model_fields_set else None,
-                    mode=mode if "mode" in request.model_fields_set else None)
-            conversations.append_trace(request.conversation_id, trace)
-        return trace
+                "settings": {**settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
+                "stages": stages, "selected_evidence": candidates[:settings.evidence_limit],
+                "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000}}
 
+    def search_constraints(request: MessageRequest, conversation):
+        """The filters and mode a message searches under; the request overrides the conversation's preferences."""
+        filters = request.filters
+        if conversation is not None and "filters" not in request.model_fields_set:
+            filters = ExactFilters.model_validate(conversation["current_filters"])
+        mode = conversation['current_mode'] if conversation is not None and 'mode' not in request.model_fields_set else request.mode
+        if mode not in ("keyword", "vector", "hybrid", "hybrid_rerank"):
+            raise HTTPException(422, "Choose keyword, vector, hybrid, or hybrid_rerank mode.")
+        if not query_words(request.question):
+            raise HTTPException(422, "Enter at least one word to search.")
+        return filters, mode
+
+    def remember_constraints(conversation_id, request: MessageRequest, filters, mode):
+        if {"filters", "mode"} & request.model_fields_set:
+            conversations.update_preferences(conversation_id,
+                filters=filters if "filters" in request.model_fields_set else None,
+                mode=mode if "mode" in request.model_fields_set else None)
+
+    def retrieve(query, mode, filters, settings):
+        """One search in one read transaction, so its corpus record matches the cards it found."""
+        with connect(path) as db:
+            db.execute("BEGIN")
+            corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
+            search = run_search(db, query, mode, filters, settings)
+        return (dict(corpus) if corpus else None), search
+
+    @app.post("/api/search")
+    def search(request: SearchRequest):
+        """Search the typed text as-is under the request's filters and mode; nothing is saved or generated."""
+        filters, mode = search_constraints(request, None)
+        corpus, search = retrieve(request.question, mode, filters, request.settings)
+        return {"trace_id": str(uuid4()), "question": request.question, "corpus": corpus,
+                "searches": [search], "selected_evidence": combined_evidence([search]),
+                "timings_ms": {"retrieval": search["timings_ms"]["retrieval"]}}
+
+    register_streaming(app, conversations, provider, request_model=MessageRequest, constraints=search_constraints,
+                       remember=remember_constraints, retrieve=retrieve)
     register_evaluation(app, search, SearchRequest)
     return app
