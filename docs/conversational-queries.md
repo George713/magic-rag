@@ -8,7 +8,7 @@ Answer generation also receives the actual query and a bounded frozen copy of ea
 
 The first turn has no earlier context and is searched as submitted. When rewriting is available its status is `not_needed`. A successful follow-up records `rewritten`. If the provider is absent, its suitability is unconfirmed, its request fails, or its response is malformed, the status is `unavailable` and the submitted text is searched **exactly as-is** under the current explicit filters. The interface explains the fallback and recommends a self-contained question. It never claims an unavailable rewrite resolved a contextual reference.
 
-The inspector and saved trace retain `question`, actual `query`, `rewrite.status`, `rewrite.message`, and measured `rewrite.elapsed_ms` (also in `timings_ms.rewrite`). The retrieval total includes rewriting; individual keyword/vector/fusion/reranking timings remain separate. Reopening a turn displays its original saved provenance without rewriting or searching again.
+The inspector and saved trace retain `question`, each search's actual `query`, `rewrite.status`, `rewrite.message`, and measured `rewrite.elapsed_ms` (also in `timings_ms.rewrite`). The retrieval total includes rewriting; individual keyword/vector/fusion/reranking timings remain separate. Reopening a turn displays its original saved provenance without rewriting or searching again.
 
 ## Explicit filters
 

@@ -140,7 +140,7 @@ def run_benchmark(request, search, search_request):
         if corpus is not None and trace["corpus"] != corpus:
             raise HTTPException(409, "Corpus changed during the benchmark. Repeat against one stable corpus.")
         corpus = trace["corpus"]
-        for name, config in trace["models"].items():
+        for name, config in (item for search in trace["searches"] for item in search["models"].items()):
             if name in models and models[name] != config:
                 raise HTTPException(409, "Model configuration changed during the benchmark.")
             models[name] = config

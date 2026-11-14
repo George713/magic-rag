@@ -71,6 +71,18 @@ class SearchRequest(BaseModel):
     filters: ExactFilters = Field(default_factory=ExactFilters)
 
 
+def combined_evidence(searches):
+    """Evidence for an answer is every search's selected cards, first occurrence wins."""
+    seen = set()
+    evidence = []
+    for search in searches:
+        for card in search["selected_evidence"]:
+            if card["card_id"] not in seen:
+                seen.add(card["card_id"])
+                evidence.append(card)
+    return evidence
+
+
 def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None, reranker: Reranker | None = None, chat_model=None, corpus_source=None) -> FastAPI:
     # The chat model is the only model substitution point; without one, the server configuration decides.
     provider = ChatModelProvider(chat_model) if chat_model is not None else provider_from_env()
@@ -97,6 +109,54 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
                     "sqlite_vec_version": db.execute("SELECT vec_version()").fetchone()[0],
                     "fts5": True, "card_count": db.execute("SELECT count(*) FROM cards").fetchone()[0]}
 
+    def run_search(db, query, mode, filters, settings):
+        """One search: its query, the snapshot of mode/filters it ran under, stage rankings, timings, and selected cards."""
+        start = perf_counter()
+        tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
+        expression = " OR ".join('"' + token + '"' for token in tokens)
+        eligibility, filter_parameters = filters.sql()
+        stages = {}
+        timings = {}
+        branches = ("keyword", "vector") if mode in ("hybrid", "hybrid_rerank") else (mode,)
+        for branch in branches:
+            stage_start = perf_counter()
+            try:
+                rows = search_vectors(db, query, embedding_model, settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
+                    FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
+                    WHERE card_fts MATCH ? AND {eligibility}
+                    ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
+                    (expression, *filter_parameters, query, settings.keyword_candidates)).fetchall()
+            except EmbeddingError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            stages[branch] = []
+            for rank, row in enumerate(rows, 1):
+                card = dict(row)
+                card["colors"] = json.loads(card["colors"])
+                presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
+                card["images"] = json.loads(presentation["images"]) if presentation else []
+                card["source_url"] = presentation["source_url"] if presentation else None
+                card["rank"] = rank
+                stages[branch].append(card)
+            timings[branch] = (perf_counter() - stage_start) * 1000
+        if mode in ("hybrid", "hybrid_rerank"):
+            fusion_start = perf_counter()
+            stages["fused"] = fuse(stages, settings.rrf_constant, query=query)
+            timings["fusion"] = (perf_counter() - fusion_start) * 1000
+        candidates = stages["fused" if mode in ("hybrid", "hybrid_rerank") else mode]
+        if mode == "hybrid_rerank":
+            rerank_start = perf_counter()
+            try:
+                stages["reranked"] = rerank(query, candidates[:settings.rerank_candidates], reranking_model)
+            except RerankingError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            candidates = stages["reranked"]
+            timings["reranking"] = (perf_counter() - rerank_start) * 1000
+        return {"query": query, "mode": mode, "filters": filters.model_dump(exclude_defaults=True),
+                "models": {**({"embedding": embedding_model.config} if mode != "keyword" else {}), **({"reranker":reranking_model.config} if mode == "hybrid_rerank" else {})},
+                "settings": {**settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
+                "stages": stages, "selected_evidence": candidates[:settings.evidence_limit],
+                "timings_ms": {**timings, "retrieval": (perf_counter() - start) * 1000}}
+
     @app.post("/api/search")
     def search(request: SearchRequest):
         turns = []
@@ -118,57 +178,18 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         query, rewrite = from_thread.run(rewrite_query, provider, request.question,
                                         conversation_context(turns), request.conversation_id or trace_id)
         answer_context = freeze_answer_context(query, turns)
-        tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
-        expression = " OR ".join('"' + token + '"' for token in tokens)
-        eligibility, filter_parameters = filters.sql()
-        stages = {}
-        timings = {}
         with connect(path) as db:
             db.execute("BEGIN")
             corpus = db.execute("SELECT id, metadata FROM corpus LIMIT 1").fetchone()
-            branches = ("keyword", "vector") if mode in ("hybrid", "hybrid_rerank") else (mode,)
-            for branch in branches:
-                stage_start = perf_counter()
-                try:
-                    rows = search_vectors(db, query, embedding_model, request.settings.vector_candidates, filters) if branch == "vector" else db.execute(f"""SELECT cards.*, bm25(card_fts) AS score
-                        FROM card_fts JOIN cards ON cards.card_id = card_fts.card_id
-                        WHERE card_fts MATCH ? AND {eligibility}
-                        ORDER BY exact_name_match(cards.name, ?) DESC, score, cards.card_id LIMIT ?""",
-                        (expression, *filter_parameters, query, request.settings.keyword_candidates)).fetchall()
-                except EmbeddingError as exc:
-                    raise HTTPException(422, str(exc)) from exc
-                stages[branch] = []
-                for rank, row in enumerate(rows, 1):
-                    card = dict(row)
-                    card["colors"] = json.loads(card["colors"])
-                    presentation = db.execute("SELECT images, source_url FROM card_images WHERE card_id = ?", (card["card_id"],)).fetchone()
-                    card["images"] = json.loads(presentation["images"]) if presentation else []
-                    card["source_url"] = presentation["source_url"] if presentation else None
-                    card["rank"] = rank
-                    stages[branch].append(card)
-                timings[branch] = (perf_counter() - stage_start) * 1000
-        if mode in ("hybrid", "hybrid_rerank"):
-            fusion_start = perf_counter()
-            stages["fused"] = fuse(stages, request.settings.rrf_constant, query=query)
-            timings["fusion"] = (perf_counter() - fusion_start) * 1000
-        candidates = stages["fused" if mode in ("hybrid", "hybrid_rerank") else mode]
-        if mode == "hybrid_rerank":
-            rerank_start = perf_counter()
-            try:
-                stages["reranked"] = rerank(query, candidates[:request.settings.rerank_candidates], reranking_model)
-            except RerankingError as exc:
-                raise HTTPException(422, str(exc)) from exc
-            candidates = stages["reranked"]
-            timings["reranking"] = (perf_counter() - rerank_start) * 1000
-        trace = {"trace_id": trace_id, "question": request.question, "query": query,
-                "mode": mode, "filters": filters.model_dump(exclude_defaults=True), "corpus": dict(corpus) if corpus else None,
-                "models": {**({"embedding": embedding_model.config} if mode != "keyword" else {}), **({"reranker":reranking_model.config} if mode == "hybrid_rerank" else {})},
-                "settings": {**request.settings.model_dump(), "name_priority": "exact full name, case-insensitive, trimmed; before score in every stage", "vector_metric": "cosine distance (lower is better)", "fusion_metric": "reciprocal rank fusion (higher is better)", "reranker_metric":"unbounded relevance logit (higher is better)"},
-                "stages": stages, "selected_evidence": candidates[:request.settings.evidence_limit],
-                "timings_ms": {**timings, "rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
+            searches = [run_search(db, query, mode, filters, request.settings)]
+        evidence = combined_evidence(searches)
+        trace = {"trace_id": trace_id, "question": request.question,
+                "corpus": dict(corpus) if corpus else None,
+                "searches": searches, "selected_evidence": evidence,
+                "timings_ms": {"rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
                 "rewrite": rewrite,
                 "answer_context":answer_context,
-                "generation": generate_answer(provider, request.question, candidates[:request.settings.evidence_limit], request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
+                "generation": generate_answer(provider, request.question, evidence, request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:
             if {"filters", "mode"} & request.model_fields_set:
                 conversations.update_preferences(request.conversation_id,

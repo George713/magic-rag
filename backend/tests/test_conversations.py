@@ -115,25 +115,38 @@ def test_current_filter_edits_do_not_change_historical_turn_snapshots(tmp_path):
         saved = client.get(f"/api/conversations/{conversation}").json()
         assert saved["current_filters"] == {"colors": []}
         assert saved["turns"][0]["trace"] == trace
-        assert saved["turns"][0]["trace"]["filters"] == {"colors": ["U"]}
+        assert saved["turns"][0]["trace"]["searches"][0]["filters"] == {"colors": ["U"]}
 
 
-def test_pre_extension_chat_inherits_latest_filters_without_rewriting_history(tmp_path):
+def test_conversations_saved_before_search_lists_are_wiped_once_and_cards_are_kept(tmp_path):
     import json
     import sqlite3
-    path = tmp_path / "legacy.db"
-    trace = {"filters": {"colors": ["R"]}, "question": "Legacy card", "generation": {"status": "unconfigured"}}
+    from magic_rag.ingest import ingest_sample
+    path = tmp_path / "single-query.db"
+    ingest_sample(path)
+    old_trace = {"question": "Delver", "query": "Delver", "mode": "keyword", "filters": {}, "stages": {},
+                 "selected_evidence": [], "generation": {"status": "unconfigured"}}
     with sqlite3.connect(path) as db:
         db.executescript("""
-            CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-            CREATE TABLE conversation_turns (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, question TEXT NOT NULL, state TEXT NOT NULL, trace TEXT NOT NULL, answer TEXT, error TEXT, created_at TEXT NOT NULL);
-            INSERT INTO conversations VALUES ('legacy', 'Old chat', '2026-01-01', '2026-01-01');
+            CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                current_filters TEXT, current_mode TEXT NOT NULL DEFAULT 'keyword');
+            CREATE TABLE conversation_turns (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, question TEXT NOT NULL, state TEXT NOT NULL,
+                trace TEXT NOT NULL, answer TEXT, error TEXT, created_at TEXT NOT NULL);
+            INSERT INTO conversations VALUES ('old', 'Old chat', '2026-01-01', '2026-01-01', '{"colors": ["U"]}', 'hybrid');
         """)
-        db.execute("INSERT INTO conversation_turns VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ('turn', 'legacy', 'Legacy card', 'retrieval_complete', json.dumps(trace), None, None, '2026-01-01'))
+        db.execute("INSERT INTO conversation_turns VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                   ("turn", "old", "Delver", "retrieval_complete", json.dumps(old_trace), None, None, "2026-01-01"))
     with TestClient(create_app(path)) as client:
-        saved = client.get('/api/conversations/legacy').json()
-        assert saved["current_filters"] == {"colors": ["R"]}
-        assert saved["turns"][0]["trace"] == trace
+        assert client.get("/api/conversations").json() == []
+        assert client.get("/api/conversations/old").status_code == 404
+        assert client.get("/api/health").json()["card_count"] > 0
+        assert client.get("/api/corpus").json()["id"] == "controlled-sample-v1"
+        new_chat = client.post("/api/conversations").json()["id"]
+        trace = client.post("/api/search", json={"question": "Delver", "conversation_id": new_chat}).json()
+        assert trace["searches"][0]["selected_evidence"][0]["card_id"] == "sample-delver"
+    with TestClient(create_app(path)) as restarted:
+        assert [chat["id"] for chat in restarted.get("/api/conversations").json()] == [new_chat]
+        assert restarted.get(f"/api/conversations/{new_chat}").json()["turns"][0]["trace"] == trace
 
 
 def test_search_uses_current_filters_without_restoring_old_turn_snapshot(tmp_path):
@@ -146,10 +159,10 @@ def test_search_uses_current_filters_without_restoring_old_turn_snapshot(tmp_pat
         assert client.get(f"/api/conversations/{conversation_id}").json()["current_filters"] == {"colors": ["U"]}
         client.patch(f"/api/conversations/{conversation_id}", json={"filters": {"legendary": True}}).raise_for_status()
         second = client.post("/api/search", json={"question": "Delver", "conversation_id": conversation_id}).json()
-        assert second["filters"] == {"legendary": True}
+        assert second["searches"][0]["filters"] == {"legendary": True}
         assert second["selected_evidence"] == []
         saved = client.get(f"/api/conversations/{conversation_id}").json()
-        assert saved["turns"][0]["trace"]["filters"] == first["filters"] == {"colors": ["U"]}
+        assert saved["turns"][0]["trace"]["searches"][0]["filters"] == first["searches"][0]["filters"] == {"colors": ["U"]}
 
 
 def test_search_mode_persists_unsent_edits_independently_and_preserves_history(tmp_path):
@@ -180,23 +193,29 @@ def test_search_mode_persists_unsent_edits_independently_and_preserves_history(t
         assert restarted.get(f"/api/conversations/{second['id']}").json()['current_mode'] == 'keyword'
         # Omitted mode inherits the preference; explicit mode updates it.
         inherited = restarted.post('/api/search', json={'question': 'Delver', 'conversation_id': first['id']}).json()
-        assert inherited['mode'] == 'hybrid_rerank'
+        assert inherited['searches'][0]['mode'] == 'hybrid_rerank'
         restarted.post('/api/search', json={'question': 'Delver', 'conversation_id': first['id'], 'mode': 'keyword'}).raise_for_status()
         assert restarted.get(f"/api/conversations/{first['id']}").json()['current_mode'] == 'keyword'
 
 
-def test_existing_chat_inherits_latest_search_mode_without_rewriting_turns(tmp_path):
-    import json
-    import sqlite3
-    path = tmp_path / 'legacy-mode.db'
+def test_saved_turn_reopens_its_ordered_searches_after_restart(tmp_path):
+    from magic_rag.ingest import ingest_sample
+    path = tmp_path / "searches.db"
+    ingest_sample(path)
     with TestClient(create_app(path)) as client:
-        chat = client.post('/api/conversations').json()['id']
-        trace = client.post('/api/search', json={'question': 'Legacy', 'conversation_id': chat}).json()
-    trace['mode'] = 'hybrid'
-    with sqlite3.connect(path) as db:
-        db.execute('ALTER TABLE conversations DROP COLUMN current_mode')
-        db.execute('UPDATE conversation_turns SET trace = ?', (json.dumps(trace),))
+        conversation_id = client.post("/api/conversations").json()["id"]
+        trace = client.post("/api/search", json={
+            "question": "Delver", "conversation_id": conversation_id, "filters": {"colors": ["U"]}}).json()
     with TestClient(create_app(path)) as restarted:
-        saved = restarted.get(f'/api/conversations/{chat}').json()
-        assert saved['current_mode'] == 'hybrid'
-        assert saved['turns'][0]['trace'] == trace
+        turn = restarted.get(f"/api/conversations/{conversation_id}").json()["turns"][0]
+    assert turn["trace"] == trace
+    [search] = turn["trace"]["searches"]
+    assert search["query"] == "Delver"
+    assert search["mode"] == "keyword"
+    assert search["filters"] == {"colors": ["U"]}
+    assert search["stages"]["keyword"][0]["card_id"] == "sample-delver"
+    assert search["timings_ms"]["keyword"] >= 0
+    assert search["timings_ms"]["retrieval"] >= 0
+    assert search["selected_evidence"][0]["card_id"] == "sample-delver"
+    assert turn["trace"]["selected_evidence"] == search["selected_evidence"]
+    assert not {"query", "mode", "filters", "stages", "models", "settings"} & turn["trace"].keys()
