@@ -6,7 +6,6 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 from contextlib import contextmanager
-from anyio import from_thread
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -18,7 +17,7 @@ from .streaming import register_streaming
 from .filters import ExactFilters, register_filter_functions
 from .reranking import MiniLmReranker, Reranker, RerankingError, rerank
 from .evaluation import register_evaluation
-from .rewriting import conversation_context, freeze_answer_context, rewrite_query
+from .context import freeze_answer_context
 
 
 def default_db_path() -> Path:
@@ -184,16 +183,14 @@ def create_app(db_path: Path | None = None, *, embedder: Embedder | None = None,
         filters, mode = search_constraints(request, conversation)
         start = perf_counter()
         trace_id = str(uuid4())
-        query, rewrite = from_thread.run(rewrite_query, provider, request.question,
-                                        conversation_context(turns), request.conversation_id or trace_id)
-        answer_context = freeze_answer_context(query, turns)
-        corpus, searches = retrieve([query], mode, filters, request.settings)
+        # The typed text is searched as-is; the agent's model-written searches run only for streamed messages.
+        answer_context = freeze_answer_context([request.question], turns)
+        corpus, searches = retrieve([request.question], mode, filters, request.settings)
         evidence = combined_evidence(searches)
         trace = {"trace_id": trace_id, "question": request.question,
                 "corpus": corpus,
                 "searches": searches, "selected_evidence": evidence,
-                "timings_ms": {"rewrite": rewrite["elapsed_ms"], "retrieval": (perf_counter() - start) * 1000},
-                "rewrite": rewrite,
+                "timings_ms": {"retrieval": (perf_counter() - start) * 1000},
                 "answer_context":answer_context,
                 "generation": generate_answer(provider, request.question, evidence, request.conversation_id or trace_id, context=answer_context) if request.generate_answer else provider_status(provider)}
         if request.conversation_id is not None:

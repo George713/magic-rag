@@ -6,13 +6,13 @@ from pathlib import Path
 import uvicorn
 from magic_rag.app import create_app, connect
 from magic_rag.ingest import ingest_sample
-from scripted_chat_model import ScriptedChatModel
+from scripted_chat_model import ScriptedChatModel, offers_tools, search_call
 
 def chat_model(call):
     source = call.source
     question = source["question"]
-    if "history" in source:
-        return {"query": "Delver" if question == "Show those again" else question}
+    if offers_tools(call):
+        return search_call("Delver" if question == "Show those again" else question)
     evidence = source["selected_evidence"]
     assets = [evidence[0]["card_id"]] if "assets" in question else []
     if "multiple assets" in question:

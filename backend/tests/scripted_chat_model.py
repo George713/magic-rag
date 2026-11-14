@@ -101,3 +101,27 @@ class ScriptedChatModel(BaseChatModel):
                   for index, call in enumerate(message.tool_calls)]
         yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=chunks,
                                                          response_metadata=message.response_metadata or {"finish_reason": "stop"}))
+
+
+def search_call(*queries):
+    """A scripted assistant turn that calls `search_cards` once per query."""
+    return AIMessage(content="", tool_calls=[{"name": "search_cards", "args": {"query": query}, "id": f"call-{index}"}
+                                            for index, query in enumerate(queries)],
+                     response_metadata={"finish_reason": "tool_calls"})
+
+
+def offers_tools(call):
+    """Whether this model call is the agent choosing a search (tools offered) rather than the answer call."""
+    return bool(call.kwargs.get("tools"))
+
+
+def searching(answer, query=None):
+    """A responder for any number of messages: search (`query(call)`, default the typed question), then answer.
+
+    `answer` is a scripted step (or a responder) for the answer call.
+    """
+    def respond(call):
+        if offers_tools(call):
+            return search_call(query(call) if query else call.source["question"])
+        return answer
+    return respond

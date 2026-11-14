@@ -100,7 +100,7 @@ Standards and specification reviews independently examined `94254c8...d268b8c` a
 
 ## Reproduce browser checks
 
-From `web`, run `npx playwright test` and each configuration: `playwright.workspace.config.ts`, `playwright.chat.config.ts`, `playwright.streaming.config.ts`, `playwright.filters.config.ts`, `playwright.rewriting.config.ts`, `playwright.vector.config.ts`, `playwright.hybrid.config.ts`, and `playwright.reranking.config.ts`. Each configuration runs isolated local service processes and ignored test databases. API checks: `uv run pytest`; frontend checks: `npm run check` and `npm run build`.
+From `web`, run `npx playwright test` and each configuration: `playwright.workspace.config.ts`, `playwright.chat.config.ts`, `playwright.streaming.config.ts`, `playwright.filters.config.ts`, `playwright.agent.config.ts`, `playwright.vector.config.ts`, `playwright.hybrid.config.ts`, and `playwright.reranking.config.ts`. Each configuration runs isolated local service processes and ignored test databases. API checks: `uv run pytest`; frontend checks: `npm run check` and `npm run build`.
 
 ## Final results
 

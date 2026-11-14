@@ -4,22 +4,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from magic_rag.app import create_app
-from scripted_chat_model import ScriptedChatModel
-from test_rewriting import ATOG, INITIAL, FOLLOWUP, STANDALONE, seed_artifact_cards
+from artifact_cards import ATOG, INITIAL, FOLLOWUP, STANDALONE, seed_artifact_cards
+from scripted_chat_model import ScriptedChatModel, offers_tools, search_call, searching
 from test_streaming import send_message
 
 
-@pytest.mark.parametrize("streamed", [False, True])
-def test_followup_answers_receive_frozen_topic_context_separate_from_card_evidence(tmp_path, streamed):
+def test_followup_answers_receive_frozen_topic_context_separate_from_card_evidence(tmp_path):
     answer_requests = []
 
     async def unfinished(call):
         yield '{"text":"Failed unverified partial'
 
-    def model(call):
+    def answer(call):
         source = call.source
-        if "history" in source:
-            return {"query":STANDALONE}
         answer_requests.append(source)
         if source["question"] == INITIAL:
             return unfinished(call)
@@ -29,20 +26,18 @@ def test_followup_answers_receive_frozen_topic_context_separate_from_card_eviden
 
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
+    model = ScriptedChatModel(script=searching(answer, query=lambda call: STANDALONE if call.source["question"] == FOLLOWUP else call.source["question"]))
+    with TestClient(create_app(path, chat_model=model)) as client:
         conversation = client.post("/api/conversations").json()["id"]
         assert send_message(client, conversation, INITIAL)[-1]["generation"]["status"] == "failed"
-        client.post("/api/search", json={"question":"Atog","conversation_id":conversation,"generate_answer":True})
-        if streamed:
-            events = send_message(client, conversation, FOLLOWUP)
-            assert events[1]["query"] == STANDALONE
-            followup = events[-1]["trace"]
-        else:
-            followup = client.post("/api/search", json={"question":FOLLOWUP,"conversation_id":conversation,"generate_answer":True}).json()
+        assert send_message(client, conversation, "Atog")[-1]["generation"]["status"] == "completed"
+        events = send_message(client, conversation, FOLLOWUP)
+        assert events[1]["query"] == STANDALONE
+        followup = events[-1]["trace"]
         assert followup["generation"]["status"] == "completed"
-        request = next(source for source in reversed(answer_requests) if source["question"] == FOLLOWUP)
-        expected = [{"question":INITIAL,"query":INITIAL},{"question":"Atog","query":STANDALONE,"answer":"Completed Atog explanation."}]
-        assert request["retrieval_query"] == STANDALONE
+        request = answer_requests[-1]
+        expected = [{"question":INITIAL,"query":INITIAL},{"question":"Atog","query":"Atog","answer":"Completed Atog explanation."}]
+        assert request["search_queries"] == [STANDALONE]
         assert request["conversation_context"] == expected
         assert all("selected_evidence" not in item for item in request["conversation_context"])
         assert request["selected_evidence"][0]["card_id"] == ATOG
@@ -52,8 +47,6 @@ def test_followup_answers_receive_frozen_topic_context_separate_from_card_eviden
 
 def test_answer_context_bounds_older_text_and_turn_count_without_clipping_card_evidence(tmp_path):
     def verbose(call):
-        if "history" in call.source:
-            return {"query":call.source["question"]}
         return {"text":"A completed explanation. " + "x" * 12000,"citations":[ATOG],"insufficient_evidence":False}
 
     path = tmp_path / "cards.db"
@@ -75,26 +68,25 @@ def test_answer_context_bounds_older_text_and_turn_count_without_clipping_card_e
         assert sum(len(value) for item in history for value in item.values()) <= 16000
 
 @pytest.mark.parametrize("text", ["", "Atog sacrifices artifacts."])
-def test_completed_asset_references_reach_followup_rewrite_and_frozen_answer_context(tmp_path, text):
+def test_completed_asset_references_reach_the_followup_search_and_frozen_answer_context(tmp_path, text):
     requests = []
     def model(call):
-        source = call.source
-        requests.append(source)
-        if "history" in source:
-            return {"query":"Atog"}
+        requests.append(call)
+        if offers_tools(call):
+            return search_call("Atog")
         return {"assets":[ATOG], "text":text, "citations":[ATOG] if text else []}
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
     with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
         conversation = client.post("/api/conversations").json()["id"]
-        first = client.post("/api/search", json={"question":"Atog", "conversation_id":conversation, "generate_answer":True}).json()
-        assert first["generation"]["status"] == "completed"
-        followup = client.post("/api/search", json={"question":"Which of those cost less mana?", "conversation_id":conversation, "generate_answer":True}).json()
+        assert send_message(client, conversation, "Atog")[-1]["generation"]["status"] == "completed"
+        followup = send_message(client, conversation, "Which of those cost less mana?")[-1]["trace"]
         expected = {"question":"Atog", "query":"Atog", "shown_cards":f"Atog [{ATOG}]"}
         if text:
             expected["answer"] = text
-        assert next(item for item in requests if "history" in item)["history"] == [expected]
-        assert requests[-1]["conversation_context"] == [expected]
+        search_choice, answer = requests[-2:]
+        assert offers_tools(search_choice) and search_choice.source["conversation_context"] == [expected]
+        assert answer.source["conversation_context"] == [expected]
         assert followup["answer_context"]["conversation_context"] == [expected]
         saved = client.get(f"/api/conversations/{conversation}").json()["turns"][-1]["trace"]
         assert saved["answer_context"]["conversation_context"] == [expected]
@@ -107,11 +99,9 @@ def test_failed_or_cancelled_generation_does_not_supply_shown_card_context(tmp_p
         if cancelled:
             raise asyncio.CancelledError()
         yield '", "assets":["%s"], "citations":["invented-card"]}' % ATOG
-    def model(call):
-        return {"query":"Atog"} if "history" in call.source else unvalidated(call)
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
-    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=model))) as client:
+    with TestClient(create_app(path, chat_model=ScriptedChatModel(script=searching(unvalidated, query=lambda call: "Atog")))) as client:
         conversation = client.post("/api/conversations").json()["id"]
         client.post(f"/api/conversations/{conversation}/messages", json={"question":"Atog"})
         saved = client.get(f"/api/conversations/{conversation}").json()["turns"][0]
@@ -124,9 +114,9 @@ def test_selected_asset_names_share_existing_context_character_and_history_limit
     from magic_rag.app import connect
     captured = []
     def model(call):
-        if "history" in call.source:
-            captured.append(call.source["history"])
-            return {"query":"Atog"}
+        if offers_tools(call):
+            captured.append(call.source["conversation_context"])
+            return search_call("Atog")
         return {"assets":[ATOG]}
     path = tmp_path / "cards.db"
     seed_artifact_cards(path)
@@ -137,7 +127,7 @@ def test_selected_asset_names_share_existing_context_character_and_history_limit
         for index in range(8):
             first = client.post("/api/search", json={"question":f"Atog {index}", "conversation_id":conversation, "generate_answer":True}).json()
             assert first["generation"]["status"] == "completed"
-        followup = client.post("/api/search", json={"question":"Those cards?", "conversation_id":conversation}).json()
+        followup = send_message(client, conversation, "Those cards?")[-1]["trace"]
         history = followup["answer_context"]["conversation_context"]
         assert len(captured[-1]) == 6
         assert all(len(item["shown_cards"]) <= 4000 for item in captured[-1])

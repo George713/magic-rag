@@ -1,19 +1,8 @@
-"""Conversational context produces a search query, never new card evidence or filters."""
-import re
-from time import perf_counter
-
-from pydantic import BaseModel, ConfigDict, Field
-
-from .providers import provider_status
+"""Bounded conversational context from earlier turns: it resolves references, never supplies card evidence or filters."""
 
 CONTEXT_TURN_LIMIT = 6
 ANSWER_CONTEXT_CHARACTER_BUDGET = 16000
 ANSWER_CONTEXT_FIELD_LIMIT = 4000
-
-
-class RewritePayload(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    query: str = Field(min_length=1, max_length=10000)
 
 
 def conversation_context(turns):
@@ -33,7 +22,8 @@ def conversation_context(turns):
     return context
 
 
-def freeze_answer_context(query, turns):
+def freeze_answer_context(queries, turns):
+    """The answer's snapshot of this message's search queries and bounded earlier turns."""
     history = []
     remaining = ANSWER_CONTEXT_CHARACTER_BUDGET
     truncated = len(turns) > CONTEXT_TURN_LIMIT
@@ -49,27 +39,5 @@ def freeze_answer_context(query, turns):
             break
         history.append(clipped)
         remaining -= size
-    return {"retrieval_query":query, "conversation_context":list(reversed(history)), "context_truncated":truncated}
+    return {"search_queries":list(queries), "conversation_context":list(reversed(history)), "context_truncated":truncated}
 
-
-async def rewrite_query(provider, question, history, session_id):
-    start = perf_counter()
-    query = question
-    status = "unavailable"
-    message = "Conversational rewriting is unavailable. Submitted text is searched as-is; submit a self-contained question."
-    if provider_status(provider)["status"] == "ready" and hasattr(provider, "rewrite"):
-        if not history:
-            status = "not_needed"
-            message = "No earlier turns in this conversation. Submitted text is searched as-is."
-        else:
-            try:
-                result = RewritePayload.model_validate(await provider.rewrite(question, history, session_id))
-                standalone = result.query.strip()
-                if not re.search(r"[^\W_]+", standalone, flags=re.UNICODE):
-                    raise ValueError("A retrieval query must contain words.")
-                query = standalone
-                status = "rewritten"
-                message = "Standalone search query rewritten from this conversation. Explicit filters are unchanged."
-            except Exception:
-                pass
-    return query, {"status": status, "message": message, "elapsed_ms": (perf_counter() - start) * 1000}

@@ -13,7 +13,7 @@ def test_empty_corpus_still_explains_search_and_provider_state(tmp_path):
     assert trace["corpus"] is None
     assert trace["selected_evidence"] == []
     assert trace["generation"]["status"] == "unconfigured"
-    assert trace["rewrite"]["status"] == "unavailable"
+    assert "rewrite" not in trace
 
 
 def test_sample_search_retains_all_faces_and_collapses_printings(tmp_path):
